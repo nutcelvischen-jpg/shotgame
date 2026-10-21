@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>烙賽模擬器</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#111;font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block}
+#hud{position:fixed;left:0;right:0;top:0;padding:12px 14px 0;color:#fff;pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,.7)}
+.row{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px}
+.bar{height:8px;background:rgba(255,255,255,.2);border-radius:6px;overflow:hidden;margin-bottom:8px}
+.bar>i{display:block;height:100%;width:0}
+#lvl{font-size:16px;font-weight:700;margin-bottom:8px}
+#power{position:fixed;right:14px;top:28%;width:16px;height:34%;background:rgba(0,0,0,.35);border:2px solid rgba(255,255,255,.5);border-radius:10px;overflow:hidden;pointer-events:none}
+#power .zone{position:absolute;left:0;right:0;bottom:35%;height:30%;background:rgba(90,230,130,.45)}
+#power .lvl{position:absolute;left:0;right:0;bottom:0;height:0;background:#c8873a}
+#powtxt{position:fixed;right:6px;top:calc(28% - 22px);color:#fff;font-size:12px;width:34px;text-align:center;text-shadow:0 1px 3px #000}
+#push{position:fixed;right:18px;bottom:calc(24px + env(safe-area-inset-bottom));width:96px;height:96px;border-radius:50%;border:none;background:#8a5a2b;color:#fff;font-size:22px;font-weight:700;box-shadow:0 6px 0 #5c3a19;display:none}
+#push.on{transform:translateY(4px);box-shadow:0 2px 0 #5c3a19}
+#toast{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);color:#fff;font-size:30px;font-weight:800;text-shadow:0 2px 8px #000;pointer-events:none;opacity:0;transition:opacity .3s}
+#msg{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(10,12,10,.72);color:#fff;text-align:center;padding:24px}
+#msg h1{font-size:30px;margin:0 0 10px}#msg p{font-size:16px;line-height:1.7;margin:4px 0 18px;max-width:440px}
+#msg button.go{font-size:18px;padding:12px 30px;border-radius:30px;border:none;background:#c8873a;color:#fff;font-weight:700}
+#doors{display:flex;gap:10px;margin:6px 0 18px}
+.door{width:70px;height:130px;background:#5b8cbf;border-radius:5px;border:3px solid #2f557d;color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative}
+.door::after{content:"";position:absolute;right:8px;top:55%;width:8px;height:8px;border-radius:50%;background:#ddd}
+.door.occ{background:#9c3a3a;border-color:#6b2222}
+.hidden{display:none!important}
+</style></head><body>
+<div id="hud"><div id="lvl"></div>
+<div class="row"><span>肚子存量</span><span id="stockT"></span></div><div class="bar"><i id="stockB" style="background:#c8873a"></i></div>
+<div class="row"><span>命中率</span><span id="hitT"></span></div><div class="bar"><i id="hitB" style="background:#6fd38a"></i></div>
+<div class="row"><span>忍耐值</span><span id="patT"></span></div><div class="bar"><i id="patB" style="background:#e0605a"></i></div>
+</div>
+<div id="powtxt">力道</div><div id="power"><div class="zone"></div><div class="lvl"></div></div>
+<button id="push">用力</button>
+<div id="toast"></div>
+<div id="msg"></div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+window.__errs=[];window.addEventListener('error',e=>window.__errs.push(String(e.message)));
+const $=s=>document.querySelector(s);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+// ---------- renderer / scene ----------
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x1d211d);
+const pmrem=new THREE.PMREMGenerator(renderer);
+scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;scene.environmentIntensity=0.55;
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
+function fitCam(){camera.aspect=innerWidth/innerHeight;camera.fov=camera.aspect<1?72:52;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}
+addEventListener('resize',fitCam);fitCam();
+scene.add(new THREE.HemisphereLight(0xf2fff0,0x404840,0.55));
+const sun=new THREE.DirectionalLight(0xf4fff0,1.7);sun.position.set(0.25,2.5,0.7);sun.castShadow=true;
+sun.shadow.mapSize.set(1024,1024);Object.assign(sun.shadow.camera,{left:-.8,right:.8,top:.8,bottom:-.8,near:.5,far:4});sun.shadow.bias=-0.0006;
+scene.add(sun);
+const catcher=new THREE.Mesh(new THREE.PlaneGeometry(1,1.6).rotateX(-Math.PI/2),new THREE.ShadowMaterial({opacity:.32}));
+catcher.position.set(0,.003,.35);catcher.receiveShadow=true;scene.add(catcher);
+
+const loader=new GLTFLoader();const cache={};
+async function loadGLB(f){if(!cache[f])cache[f]=await loader.loadAsync('models/'+f);return cache[f].scene.clone(true);}
+const stall=(await loader.loadAsync('models/stall.glb')).scene;
+stall.traverse(o=>{if(o.isMesh){const m=o.material;if(m.name&&m.name.endsWith('_Bake')){o.material=new THREE.MeshBasicMaterial({map:m.map,toneMapped:false});}else{o.castShadow=o.receiveShadow=true;}}});
+scene.add(stall);
+
+// ---------- game data ----------
+const SEG=0.022,H=1/120,G=-9.8,TOTAL=1.8;
+const LEVELS=[
+ {name:'第 1 關｜標準坐式',file:'toilet_western.glb',node:'Toilet_Western',hit:'western',emitY:.82,sway:0,amount:1.8,rate:1,fall:1,marker:true,intro:'先熱身。移動屁股對準，按住出力。'},
+ {name:'第 2 關｜蹲式茅坑',file:'toilet_squat.glb',node:'Toilet_Squat',hit:'squat',emitY:.55,sway:.02,amount:2.3,rate:1.15,fall:1.15,marker:true,offset:[0,.12,0],step:true,intro:'洞是長的，前後要抓好。'},
+ {name:'第 3 關｜兒童馬桶',file:'toilet_mini.glb',node:'Toilet_Mini',hit:'western',emitY:.62,sway:.03,amount:2.7,rate:1.3,fall:1.3,marker:false,doors:3,intro:'大人的屁股，小孩的馬桶。落點提示沒了。'},
+ {name:'第 4 關｜歪掉的馬桶',file:'toilet_tilted.glb',node:'Toilet_Tilted',hit:'western',emitY:.85,sway:.04,amount:3.1,rate:1.45,fall:1.45,marker:false,intro:'到底是誰裝的啦。'},
+ {name:'第 5 關｜只剩小便斗',file:'toilet_urinal.glb',node:'Toilet_Urinal',hit:'urinal',emitY:1.08,sway:.045,amount:3.5,rate:1.6,fall:1.6,marker:false,doors:4,offset:[0,0,-.24],intro:'沒得選了，瞄準那個小洞。'},
+ {name:'第 6 關｜會跑的馬桶',file:'toilet_western.glb',node:'Toilet_Western',hit:'western',emitY:.82,sway:.055,amount:4.0,rate:1.8,fall:1.8,marker:false,moving:true,intro:'它會躲。'},
+];
+const HIT={
+ western:{rimY:.43,rx:.17,rz:.21,cz:0,outer:.06,waterY:.27},
+ squat:{rimY:.015,rx:.14,rz:.24,cz:.05,outer:.05,waterY:-.10},
+ urinal:{rimY:.62,rx:.15,rz:.15,cz:-.02,outer:.04,waterY:.47,half:true},
+};
+let L=null,li=0,hp=null,model=null,node=null,stepMesh=null,state='menu',t=0;
+let power=0,pushing=false,forced=0,idle=0,stock=TOTAL,acc=0,patience=100,endTimer=0;
+const strands=[];let active=null;
+const emitter=new THREE.Vector3(),smooth=new THREE.Vector3(),target=new THREE.Vector3();
+const poopMat=new THREE.MeshPhysicalMaterial({color:0x5a3317,roughness:.42,clearcoat:.6,clearcoatRoughness:.35});
+
+// indicators
+const ring=new THREE.Mesh(new THREE.RingGeometry(.028,.038,32).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.55,depthTest:false}));
+ring.renderOrder=10;scene.add(ring);
+const marker=new THREE.Mesh(new THREE.CircleGeometry(.022,24),new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.35,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-4}));
+scene.add(marker);
+// peach butt
+const peach=new THREE.Group();
+{const g=new THREE.SphereGeometry(.05,40,28);const col=[],c=new THREE.Color(),top=new THREE.Color(0xffc27a),mid=new THREE.Color(0xff9a8a),bot=new THREE.Color(0xe8506a);
+ const p=g.attributes.position;for(let i=0;i<p.count;i++){const y=p.getY(i)/.05;if(y>0)c.copy(mid).lerp(top,y);else c.copy(mid).lerp(bot,-y);col.push(c.r,c.g,c.b);}
+ g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+ const pm=new THREE.MeshPhysicalMaterial({vertexColors:true,roughness:.62,sheen:1,sheenColor:new THREE.Color(0xffe0d0),sheenRoughness:.45});
+ for(const sx of[-1,1]){const m=new THREE.Mesh(g,pm);m.position.set(sx*.031,0,0);m.scale.set(1,1.04,.96);m.castShadow=true;peach.add(m);}
+ const stem=new THREE.Mesh(new THREE.CylinderGeometry(.003,.004,.022,8),new THREE.MeshStandardMaterial({color:0x6b4a2a,roughness:.8}));
+ stem.position.set(0,.056,0);stem.rotation.z=.25;peach.add(stem);
+ const leaf=new THREE.Mesh(new THREE.SphereGeometry(.03,16,8),new THREE.MeshStandardMaterial({color:0x5fae4a,roughness:.5}));
+ leaf.scale.set(1,.12,.45);leaf.position.set(.028,.063,0);leaf.rotation.set(0,.4,-.35);leaf.castShadow=true;peach.add(leaf);}
+peach.visible=false;scene.add(peach);
+// splash pool
+const drops=[];const dropMat=new THREE.MeshStandardMaterial({color:0xcfe6ee,roughness:.05,metalness:0});
+for(let i=0;i<40;i++){const m=new THREE.Mesh(new THREE.SphereGeometry(.006,8,6),dropMat);m.visible=false;scene.add(m);drops.push({m,v:new THREE.Vector3(),life:0});}
+function splash(p){let n=0;for(const d of drops){if(d.life<=0&&n<8){d.m.position.copy(p);d.v.set((Math.random()-.5)*.8,.6+Math.random()*.9,(Math.random()-.5)*.8);d.life=.5+Math.random()*.3;d.m.visible=true;n++;}}}
+
+// audio
+let ac=null;function audio(){if(!ac){try{ac=new AudioContext();}catch(e){}}if(ac&&ac.state==='suspended')ac.resume();musicStart();}
+function plop(){if(!ac)return;const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.setValueAtTime(700,ac.currentTime);o.frequency.exponentialRampToValueAtTime(110,ac.currentTime+.16);g.gain.setValueAtTime(.35,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+.22);o.connect(g).connect(ac.destination);o.start();o.stop(ac.currentTime+.25);}
+function splat(){if(!ac)return;const b=ac.createBuffer(1,ac.sampleRate*.12,ac.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length)**2;const s=ac.createBufferSource(),f=ac.createBiquadFilter(),g=ac.createGain();f.type='lowpass';f.frequency.value=600;g.gain.value=.5;s.buffer=b;s.connect(f).connect(g).connect(ac.destination);s.start();}
+
+// ---------- music (procedural electro) ----------
+const music={on:false,step:0,next:0,muted:false,master:null,noise:null};
+const BASS=[0,0,12,0, 3,0,10,0, 0,0,12,0, 7,5,3,-2];
+const ARP=[0,3,7,12,15,12,7,3];
+function mtof(m){return 440*Math.pow(2,(m-69)/12);}
+function musicStart(){if(!ac||music.on)return;music.on=true;
+ music.master=ac.createGain();music.master.gain.value=music.muted?0:.2;music.master.connect(ac.destination);
+ const b=ac.createBuffer(1,ac.sampleRate*.5,ac.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;music.noise=b;
+ music.next=ac.currentTime+.06;setInterval(schedule,25);}
+function mood(){
+ if(state!=='play')return{bpm:state==='doors'?124:100,int:state==='doors'?.45:.15};
+ const left=stock/L.amount;const int=.3+.45*(1-left)+(power>.85?.25:0)+li*.05;
+ return{bpm:112+li*6+(left<.3?10:0)+(power>.85?6:0),int:Math.min(1,int)};}
+function nz(t,dur,type,freq,g){const s=ac.createBufferSource(),f=ac.createBiquadFilter(),v=ac.createGain();s.buffer=music.noise;f.type=type;f.frequency.value=freq;
+ v.gain.setValueAtTime(g,t);v.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(f).connect(v).connect(music.master);s.start(t);s.stop(t+dur+.02);}
+function tone(t,freq,dur,type,g,cut){const o=ac.createOscillator(),f=ac.createBiquadFilter(),v=ac.createGain();o.type=type;o.frequency.setValueAtTime(freq,t);
+ f.type='lowpass';f.frequency.setValueAtTime(cut,t);f.Q.value=6;v.gain.setValueAtTime(g,t);v.gain.exponentialRampToValueAtTime(.001,t+dur);
+ o.connect(f).connect(v).connect(music.master);o.start(t);o.stop(t+dur+.02);}
+function kick(t){const o=ac.createOscillator(),v=ac.createGain();o.frequency.setValueAtTime(160,t);o.frequency.exponentialRampToValueAtTime(42,t+.12);
+ v.gain.setValueAtTime(.9,t);v.gain.exponentialRampToValueAtTime(.001,t+.28);o.connect(v).connect(music.master);o.start(t);o.stop(t+.3);}
+function schedule(){const m=mood();const spb=60/m.bpm/4;
+ while(music.next<ac.currentTime+.12){const t=music.next,s=music.step,i=m.int,root=45+(Math.floor(s/16)%4===3?-2:0);
+  if(s%4===0)kick(t);
+  if(i>.2&&s%2===1)nz(t,.04,'highpass',8000,.18);
+  if(i>.55&&s%4===2)nz(t,.025,'highpass',9000,.08);
+  if(i>.35&&(s%16===4||s%16===12))nz(t,.14,'bandpass',1600,.45);
+  tone(t,mtof(root+BASS[s%16]),spb*.9,'sawtooth',.32,300+i*1800);
+  if(i>.6)tone(t,mtof(root+24+ARP[(s*3)%8]),spb*.6,'square',.07,2500+i*3000);
+  if(i>.85&&s%4===2)tone(t,mtof(root+36),spb*.4,'triangle',.08,6000);
+  music.next+=spb;music.step=(music.step+1)%64;}}
+const mb=document.createElement('button');mb.textContent='🔊';mb.style.cssText='position:fixed;left:12px;bottom:calc(16px + env(safe-area-inset-bottom));width:44px;height:44px;border-radius:50%;border:none;background:rgba(0,0,0,.45);color:#fff;font-size:20px;z-index:5';
+document.body.appendChild(mb);
+mb.addEventListener('pointerdown',e=>{e.stopPropagation();audio();music.muted=!music.muted;mb.textContent=music.muted?'🔇':'🔊';if(music.master)music.master.gain.value=music.muted?0:.2;});
+let toastT=0;function toast(s){const e=$('#toast');e.textContent=s;e.style.opacity=1;toastT=1.4;}
+
+// ---------- levels ----------
+function clearLevel(){for(const s of strands){if(s.mesh){scene.remove(s.mesh);s.mesh.geometry.dispose();}}strands.length=0;active=null;
+ if(model)scene.remove(model);if(stepMesh){scene.remove(stepMesh);stepMesh=null;}}
+async function startLevel(i){
+ clearLevel();li=i;L=LEVELS[i];hp=HIT[L.hit];
+ model=await loadGLB(L.file);model.traverse(o=>{if(o.isMesh){o.castShadow=o.receiveShadow=true;}});
+ if(L.offset)model.position.set(...L.offset);scene.add(model);
+ node=model.getObjectByName(L.node)||model.children[0];
+ if(L.step){const sh=new THREE.Shape();sh.moveTo(-.35,-.55);sh.lineTo(.35,-.55);sh.lineTo(.35,.55);sh.lineTo(-.35,.55);sh.closePath();
+  const hole=new THREE.Path();hole.absellipse(0,0,.19,.405,0,Math.PI*2,true);sh.holes.push(hole);
+  const g=new THREE.ExtrudeGeometry(sh,{depth:.12,bevelEnabled:false}).rotateX(-Math.PI/2);
+  stepMesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xc9d2cf,roughness:.35}));stepMesh.castShadow=stepMesh.receiveShadow=true;scene.add(stepMesh);}
+ stock=L.amount;acc=0;power=0;forced=0;idle=0;endTimer=0;
+ smooth.set(0,L.emitY,.05);target.copy(smooth);emitter.copy(smooth);
+ camera.position.set(0,1.55,.28);camera.lookAt(0,.2,-.05);
+ $('#lvl').textContent=L.name+(li>0?'　'+'🔥'.repeat(Math.min(3,Math.ceil(li/2))):'');state='play';hideMsg();toast(L.intro.split('。')[0]);
+}
+function floorAt(x,z){return (L&&L.step&&Math.abs(x)<.35&&Math.abs(z)<.55)?.12:0;}
+
+// ---------- strands ----------
+function startStrand(){
+ const r=power>.85?.012:.03-power*.016;
+ const maxLen=power>.85?.04+Math.random()*.04:.25+Math.random()*.45*(1-power);
+ active={pts:[],r,maxLen,len:0,seed:Math.random()*100,mesh:null,splashed:false};strands.push(active);
+ const p=emitter.clone();active.pts.push({p,q:p.clone(),state:'pinned',prevL:0,local:null});
+}
+function emitParticle(){
+ const a=active;const v0=(.35+power*2.0)*L.fall;const jit=power>.7?(power-.7)*2.5:.03;
+ const last=a.pts[a.pts.length-1];
+ last.state='free';last.prevL=node.worldToLocal(last.p.clone()).y;
+ last.q.set(last.p.x-(Math.random()-.5)*jit*H,last.p.y+v0*H,last.p.z-(Math.random()-.5)*jit*H);
+ const p=emitter.clone();a.pts.push({p,q:p.clone(),state:'pinned',prevL:0,local:null});a.len+=SEG;
+}
+function breakStrand(){if(!active)return;const last=active.pts[active.pts.length-1];
+ if(active.pts.length<2){strands.splice(strands.indexOf(active),1);active=null;return;}
+ last.state='free';last.prevL=node.worldToLocal(last.p.clone()).y;last.q.copy(last.p);last.q.y+=.3*H;active=null;}
+const FROZEN={water:1,rim:1,miss:1};
+let waterCount=0;
+function physics(){
+ const lv=new THREE.Vector3(),tmp=new THREE.Vector3();
+ for(const s of strands){
+  const P=s.pts;
+  for(const o of P){
+   if(o.state==='pinned'){o.p.copy(emitter);o.q.copy(emitter);continue;}
+   if(FROZEN[o.state]){if(o.local&&L.moving){o.p.copy(node.localToWorld(tmp.copy(o.local)));}continue;}
+   const vx=(o.p.x-o.q.x)*.996,vy=(o.p.y-o.q.y)*.996,vz=(o.p.z-o.q.z)*.996;
+   o.q.copy(o.p);o.p.x+=vx;o.p.y+=vy+G*L.fall*H*H;o.p.z+=vz;
+  }
+  for(let it=0;it<4;it++)for(let i=0;i<P.length-1;i++){
+   const a=P[i],b=P[i+1];const wa=(a.state==='free'||a.state==='in')?1:0,wb=(b.state==='free'||b.state==='in')?1:0;if(wa+wb===0)continue;
+   tmp.subVectors(b.p,a.p);const d=tmp.length()||1e-6;const k=(d-SEG)/d/(wa+wb);
+   a.p.addScaledVector(tmp,k*wa);b.p.addScaledVector(tmp,-k*wb);
+  }
+  for(const o of P){
+   if(o.state!=='free'&&o.state!=='in')continue;
+   node.worldToLocal(lv.copy(o.p));
+   if(o.state==='free'){
+    if(o.prevL>hp.rimY&&lv.y<=hp.rimY){
+     const dx=lv.x/hp.rx,dz=(lv.z-hp.cz)/hp.rz,e=dx*dx+dz*dz;
+     const ex=lv.x/(hp.rx+hp.outer),ez=(lv.z-hp.cz)/(hp.rz+hp.outer),e2=ex*ex+ez*ez;
+     if(e<1&&(!hp.half||lv.z<hp.cz)){o.state='in';o.restY=hp.waterY+.008+Math.random()*.015+Math.min(.07,waterCount*.00035);}
+     else if(e2<1){o.state='rim';lv.y=hp.rimY+s.r*.5;o.local=lv.clone();o.p.copy(node.localToWorld(lv.clone()));if(Math.random()<.3)splat();continue;}
+    }
+    o.prevL=lv.y;
+    const fy=floorAt(o.p.x,o.p.z);
+    if(o.state==='free'&&o.p.y<=fy+s.r*.5){o.p.y=fy+s.r*.5;o.state='miss';if(Math.random()<.35)splat();continue;}
+   }
+   if(o.state==='in'){
+    const dx=lv.x/hp.rx,dz=(lv.z-hp.cz)/hp.rz,e=dx*dx+dz*dz;
+    if(e>.6){const f=Math.sqrt(.6/e);lv.x*=f;lv.z=hp.cz+(lv.z-hp.cz)*f;}
+    if(hp.half&&lv.z>hp.cz-.01)lv.z=hp.cz-.01;
+    if(lv.y<=o.restY){lv.y=o.restY;o.state='water';waterCount++;o.local=lv.clone();
+     if(!s.splashed){s.splashed=true;splash(node.localToWorld(lv.clone()));plop();}}
+    o.p.copy(node.localToWorld(lv.clone()));
+   }
+  }
+ }
+}
+function buildTube(s){
+ const P=s.pts;if(P.length<2){if(s.mesh)s.mesh.visible=false;return;}
+ const arr=P.map(o=>o.p.clone());
+ for(let i=1;i<arr.length;i++)if(arr[i].distanceToSquared(arr[i-1])<1e-9)arr[i].y-=2e-4;
+ const curve=new THREE.CatmullRomCurve3(arr,false,'centripetal');
+ const Ln=curve.getLength(),tub=Math.max(6,arr.length*3),rad=10;
+ const g=new THREE.TubeGeometry(curve,tub,s.r,rad,false);
+ const pos=g.attributes.position,c=new THREE.Vector3(),v=new THREE.Vector3();
+ for(let i=0;i<=tub;i++){const u=i/tub;curve.getPointAt(u,c);const sl=u*Ln;
+  let f=Math.sqrt(clamp(Math.min(sl,Ln-sl)/(s.r*1.3),0,1));
+  f*=1+.12*Math.sin(sl*55+s.seed)+.06*Math.sin(sl*140+s.seed*2.3);
+  for(let j=0;j<=rad;j++){const k=i*(rad+1)+j;v.fromBufferAttribute(pos,k).sub(c);v.multiplyScalar(f*(1+.05*Math.sin(j*2.1+sl*80+s.seed))).add(c);pos.setXYZ(k,v.x,v.y,v.z);}}
+ g.computeVertexNormals();
+ if(s.mesh){s.mesh.geometry.dispose();s.mesh.geometry=g;s.mesh.visible=true;}
+ else{s.mesh=new THREE.Mesh(g,poopMat);s.mesh.castShadow=true;scene.add(s.mesh);}
+}
+
+// ---------- input ----------
+const ray=new THREE.Raycaster(),ndc=new THREE.Vector2(),hitP=new THREE.Vector3();
+const plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+let touchLast=null;
+const cv=renderer.domElement;
+cv.addEventListener('pointermove',e=>{
+ if(state!=='play')return;
+ if(e.pointerType==='mouse'){ndc.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);ray.setFromCamera(ndc,camera);plane.constant=-L.emitY;
+  if(ray.ray.intersectPlane(plane,hitP)){target.x=hitP.x;target.z=hitP.z;}}
+ else if(touchLast){target.x+=(e.clientX-touchLast.x)/innerWidth*1.0;target.z+=(e.clientY-touchLast.y)/innerHeight*1.3;touchLast={x:e.clientX,y:e.clientY};}
+ target.x=clamp(target.x,-.42,.42);target.z=clamp(target.z,-.42,.75);
+});
+cv.addEventListener('pointerdown',e=>{audio();if(e.pointerType==='mouse')pushing=true;else{touchLast={x:e.clientX,y:e.clientY};$('#push').style.display='block';}});
+addEventListener('pointerup',e=>{if(e.pointerType==='mouse')pushing=false;else touchLast=null;});
+const pb=$('#push');
+pb.addEventListener('pointerdown',e=>{e.stopPropagation();audio();pushing=true;pb.classList.add('on');});
+pb.addEventListener('pointerup',e=>{e.stopPropagation();pushing=false;pb.classList.remove('on');});
+pb.addEventListener('pointerleave',()=>{pushing=false;pb.classList.remove('on');});
+addEventListener('keydown',e=>{if(e.code==='Space'){audio();pushing=true;e.preventDefault();}});
+addEventListener('keyup',e=>{if(e.code==='Space')pushing=false;});
+if(matchMedia('(pointer:coarse)').matches)pb.style.display='block';
+
+// ---------- overlays ----------
+function showMsg(h){const m=$('#msg');m.innerHTML=h;m.classList.remove('hidden');}
+function hideMsg(){$('#msg').classList.add('hidden');}
+function menu(){state='menu';patience=100;
+ showMsg(`<h1>💩 烙賽模擬器</h1><p>移動滑鼠（手機：拖曳畫面）控制屁股位置，<br>按住滑鼠／空白鍵／「用力」鈕出力。<br>力道在<b style="color:#7be39a">綠區</b>最穩，太大會噴射，太久不出力會憋不住。<br>越後面量越多、掉越快、晃越大。</p><button class="go" id="go">開始烙賽</button>`);
+ $('#go').onclick=()=>{audio();enter(0);};}
+function enter(i){const lv=LEVELS[i];if(lv.doors)doorPick(i);else startLevel(i);}
+function doorPick(i){state='doors';const n=LEVELS[i].doors,free=Math.floor(Math.random()*n);
+ let h=`<h1>全滿了！</h1><p>${LEVELS[i].name}<br>每間都關著，猜哪一間有空？猜錯會扣忍耐值。</p><div id="doors">`;
+ for(let k=0;k<n;k++)h+=`<div class="door" data-k="${k}">${k+1}</div>`;showMsg(h+'</div>');
+ document.querySelectorAll('.door').forEach(d=>d.onclick=()=>{
+  if(d.classList.contains('occ'))return;
+  if(+d.dataset.k===free){startLevel(i);return;}
+  d.classList.add('occ');d.textContent='有人啦！';patience-=30;splat();
+  if(patience<=0){gameOver('來不及了……褲子陣亡。');}
+ });}
+function gameOver(s){state='over';showMsg(`<h1>${s}</h1><p>忍耐值歸零。</p><button class="go" id="go">重新開始</button>`);$('#go').onclick=menu;}
+function endLevel(){
+ state='result';let w=0,r=0,m=0;
+ for(const s of strands)for(const o of s.pts){if(o.state==='water')w++;else if(o.state==='rim')r++;else if(o.state==='miss')m++;}
+ const tot=w+r+m||1,pct=Math.round(w/tot*100),pass=pct>=60;
+ const last=li===LEVELS.length-1;
+ showMsg(`<h1>${pass?(pct>=90?'完美入洞！':'過關'):'噴得到處都是……'}</h1>
+ <p>命中率 <b>${pct}%</b><br>${r?`坐墊中獎 ${r} 段　`:''}${m?`地板 ${m} 段`:''}${(!r&&!m)?'一滴不漏':''}</p>
+ <button class="go" id="go">${pass?(last?'全破！再玩一次':'下一間'):'重來這間'}</button>`);
+ $('#go').onclick=()=>{if(!pass)startLevel(li);else if(last)menu();else enter(li+1);};
+}
+
+// ---------- loop ----------
+const down=new THREE.Vector3(0,-1,0);let phAcc=0;const clock=new THREE.Clock();
+function hud(){
+ $('#stockB').style.width=(stock/L.amount*100)+'%';$('#stockT').textContent=Math.round(stock/L.amount*100)+'%';
+ let w=0,tot=0;for(const s of strands)for(const o of s.pts){if(FROZEN[o.state]){tot++;if(o.state==='water')w++;}}
+ const pct=tot?Math.round(w/tot*100):100;$('#hitB').style.width=pct+'%';$('#hitT').textContent=tot?pct+'%':'—';
+ $('#patB').style.width=patience+'%';$('#patT').textContent=patience;
+ document.querySelector('#power .lvl').style.height=(power*100)+'%';
+ document.querySelector('#power .lvl').style.background=power>.85?'#ff4d4d':power>.65?'#ffb347':power>.35?'#7bd389':'#c8873a';
+}
+function frame(){
+ const dt=Math.min(clock.getDelta(),.05);t+=dt;
+ if(state==='play'){
+  const want=pushing||forced>0;if(forced>0)forced-=dt;
+  power=want?Math.min(1,power+dt*(forced>0?1.6:.55)):Math.max(0,power-dt*1.8);
+  if(!want&&stock>0)idle+=dt;else idle=0;
+  if(idle>5){forced=1.3;idle=0;toast('憋不住了！！');}
+  smooth.x+=(target.x-smooth.x)*Math.min(1,dt*6);smooth.z+=(target.z-smooth.z)*Math.min(1,dt*6);
+  const sw=L.sway*(1+power*1.5);
+  emitter.set(smooth.x+sw*(Math.sin(t*1.7)+.6*Math.sin(t*3.3+1)),L.emitY,smooth.z+sw*(Math.sin(t*1.3+2)+.5*Math.sin(t*2.9)));
+  if(L.moving)model.position.x=Math.sin(t*1.1)*.14+Math.sin(t*2.7)*.04;
+  if(power>.12&&stock>0){if(!active)startStrand();acc+=(.15+power*.75)*L.rate*dt;
+   while(acc>=SEG&&stock>0){acc-=SEG;stock-=SEG;emitParticle();if(active.len>=active.maxLen){breakStrand();startStrand();}}}
+  else if(active)breakStrand();
+  if(stock<=0){stock=0;if(active)breakStrand();endTimer+=dt;
+   const moving=strands.some(s=>s.pts.some(o=>!FROZEN[o.state]));if((!moving&&endTimer>.8)||endTimer>5)endLevel();}
+  camera.position.y=1.55+Math.sin(t*1.2)*.004;
+ }
+ phAcc+=dt;while(phAcc>=H){if(L&&node&&strands.length)physics();phAcc-=H;}
+ for(const s of strands){if(L.moving||s.pts.some(o=>!FROZEN[o.state]))buildTube(s);}
+ for(const d of drops){if(d.life>0){d.life-=dt;d.v.y+=G*dt;d.m.position.addScaledVector(d.v,dt);if(d.life<=0)d.m.visible=false;}}
+ ring.visible=false;peach.visible=state==='play';
+ if(peach.visible){const sq=power*.13,wob=power>.3?Math.sin(t*38)*power*.025:0;
+  peach.position.set(emitter.x,emitter.y+.048*(1-sq*.5),emitter.z);
+  peach.scale.set(1+sq+wob,1-sq,1+sq-wob);peach.rotation.y=Math.sin(t*.8)*.15;}
+ marker.visible=false;
+ if(state==='play'&&L.marker){ray.set(emitter,down);const objs=[model,stall];if(stepMesh)objs.push(stepMesh);
+  const h=ray.intersectObjects(objs,true)[0];
+  if(h){marker.visible=true;const n=h.face.normal.clone().transformDirection(h.object.matrixWorld);marker.position.copy(h.point).addScaledVector(n,.002);marker.lookAt(h.point.clone().add(n));}}
+ if(toastT>0){toastT-=dt;if(toastT<=0)$('#toast').style.opacity=0;}
+ if(state==='play')hud();
+ renderer.render(scene,camera);requestAnimationFrame(frame);
+}
+camera.position.set(0,1.55,.28);camera.lookAt(0,.2,-.05);
+menu();frame();window.__ok=true;
+</script></body></html>
