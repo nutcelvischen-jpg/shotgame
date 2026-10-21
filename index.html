@@ -176,6 +176,23 @@ async function loadVoices(){if(voLoaded||!ac)return;voLoaded=true;
  await Promise.all(VO_NAMES.map(async n=>{try{const r=await fetch('voice/'+n+'.mp3');VO[n]=await ac.decodeAudioData(await r.arrayBuffer());}catch(e){}}));}
 function say(n,force){if(!ac||!VO[n]||music.muted)return;if(!force&&voCool>0)return;
  if(voSrc){try{voSrc.stop();}catch(e){}}const s=ac.createBufferSource(),g=ac.createGain();s.buffer=VO[n];g.gain.value=1.15;s.connect(g).connect(ac.destination);s.start();voSrc=s;voCool=VO[n].duration+.25;}
+// ---- 噗噗噗：卡通放屁／擠出聲（鋸齒波＋不規則顫動＋共鳴濾波）----
+let poopNext=0;
+function pfft(when,vol,dur,pitch){if(!ac||music.muted||!music.noise)return;
+ const t0=when,o=ac.createOscillator(),lfo=ac.createOscillator(),lg=ac.createGain(),f=ac.createBiquadFilter(),g=ac.createGain();
+ o.type='sawtooth';o.frequency.setValueAtTime(pitch,t0);o.frequency.linearRampToValueAtTime(pitch*(.75+Math.random()*.2),t0+dur);
+ lfo.type='square';lfo.frequency.value=22+Math.random()*20;lg.gain.value=pitch*.35;lfo.connect(lg).connect(o.frequency);   // 顫動＝「噗嚕嚕」
+ f.type='lowpass';f.frequency.setValueAtTime(700+Math.random()*300,t0);f.frequency.linearRampToValueAtTime(320,t0+dur);f.Q.value=6;
+ g.gain.setValueAtTime(0,t0);g.gain.linearRampToValueAtTime(vol,t0+.012);g.gain.setValueAtTime(vol*.8,t0+dur*.6);g.gain.exponentialRampToValueAtTime(.001,t0+dur);
+ o.connect(f).connect(g).connect(ac.destination);o.start(t0);lfo.start(t0);o.stop(t0+dur+.02);lfo.stop(t0+dur+.02);
+ const n=ac.createBufferSource(),nb=ac.createBiquadFilter(),ng=ac.createGain();n.buffer=music.noise;nb.type='bandpass';nb.frequency.value=260;nb.Q.value=2;  // 一點氣音
+ ng.gain.setValueAtTime(vol*.5,t0);ng.gain.exponentialRampToValueAtTime(.001,t0+dur*.8);n.connect(nb).connect(ng).connect(ac.destination);n.start(t0,Math.random()*.3);n.stop(t0+dur);}
+// 出力時每幀呼叫：力道越大越密、越短促；紅區變成連發「噗噗噗噗」
+function poopTick(){if(!ac||state!=='play'||stock<=0||power<=.12){poopNext=0;return;}
+ const now=ac.currentTime;if(poopNext===0)poopNext=now;if(now<poopNext)return;
+ const spray=power>.85,dur=spray?.06+Math.random()*.04:.16+(1-power)*.14+Math.random()*.05;
+ pfft(Math.max(now,poopNext),.28+power*.25,dur,(spray?120:85)+Math.random()*35);
+ poopNext=Math.max(now,poopNext)+dur+(spray?.02:.06+(1-power)*.25+Math.random()*.08);}
 // ---- 逼真敲門聲：木門低頻共鳴 + 指節撞擊 + 廁所回音，急促度/音量隨時間上升 ----
 let knockBus=null,knockNext=0,knockBeat=0;
 function knockInit(){if(knockBus||!ac)return;
@@ -634,7 +651,7 @@ function frame(){
   smooth.x+=(target.x-smooth.x)*Math.min(1,dt*6);smooth.z+=(target.z-smooth.z)*Math.min(1,dt*6);
   const sw=(L.sway+(ev&&ev.type==='dog'&&ev.phase==='run'?.05:0))*(1+power*1.5);
   emitter.set(smooth.x+sw*(Math.sin(t*1.7)+.6*Math.sin(t*3.3+1)),L.emitY,smooth.z+sw*(Math.sin(t*1.3+2)+.5*Math.sin(t*2.9)));
-  const band=power>.85?3:power>.6?2:power>.25?1:0;if(band>powBand)say('push'+band,band===3);else if(band===0&&powBand>=2&&Math.random()<.4)say('huff');powBand=band;
+  poopTick();const band=power>.85?3:power>.6?2:power>.25?1:0;if(band>powBand)say('push'+band,band===3);else if(band===0&&powBand>=2&&Math.random()<.4)say('huff');powBand=band;
   updateEvent(dt);if(state!=='play')return requestAnimationFrame(frame);
   if(L.moving)model.position.x=Math.sin(t*1.1)*.14+Math.sin(t*2.7)*.04;
   if(power>.12&&stock>0){if(!active)startStrand();acc+=(.15+power*.75)*L.rate*dt;
