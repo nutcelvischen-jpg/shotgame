@@ -35,6 +35,7 @@ canvas{display:block}
 #wipeTop .r{display:flex;justify-content:center;gap:16px;font-size:14px}
 #wipeBtns{position:absolute;left:0;right:0;bottom:calc(20px + env(safe-area-inset-bottom));display:flex;justify-content:center;gap:12px}
 #wipeBtns button{font-size:17px;padding:12px 20px;border-radius:24px;border:none;font-weight:700;color:#fff}
+.eb{font-size:19px;padding:14px 20px;border-radius:16px;border:none;color:#fff;font-weight:800;box-shadow:0 5px 0 rgba(0,0,0,.35)}
 </style></head><body>
 <div id="hud"><div id="lvl"></div>
 <div class="row"><span>肚子存量</span><span id="stockT"></span></div><div class="bar"><i id="stockB" style="background:#c8873a"></i></div>
@@ -45,6 +46,8 @@ canvas{display:block}
 <button id="push">用力</button>
 <div id="toast"></div><div id="flash"></div>
 <button id="hold" class="hidden">🚪 頂住門！連按</button>
+<div id="evBtns" class="hidden" style="position:fixed;left:0;right:0;bottom:calc(30px + env(safe-area-inset-bottom));display:flex;justify-content:center;gap:12px;z-index:6"></div>
+<div id="snakeT" class="hidden" style="position:fixed;left:50%;top:22%;transform:translateX(-50%);color:#9dff7a;font-size:44px;font-weight:900;text-shadow:0 2px 10px #000;pointer-events:none;z-index:6"></div>
 <div id="wipeUI" class="hidden"><canvas id="wc"></canvas>
 <div id="wipeTop"><h2>🧻 擦屁股！</h2><div class="r"><span id="wTime"></span><span id="wSheets"></span><span id="wClean"></span></div>
 <div class="bar" style="width:200px;margin:8px auto 0"><i id="wStress" style="background:#ff6b6b"></i></div><div style="font-size:12px">紙張壓力（太快會破）</div></div>
@@ -90,10 +93,10 @@ const SEG=0.022,H=1/120,G=-9.8,TOTAL=1.8;
 const LEVELS=[
  {name:'第 1 關｜標準坐式',file:'toilet_western.glb',node:'Toilet_Western',hit:'western',emitY:.82,sway:0,amount:1.8,rate:1,fall:1,marker:true,intro:'先熱身。移動屁股對準，按住出力。'},
  {name:'第 2 關｜蹲式茅坑',file:'toilet_squat.glb',node:'Toilet_Squat',hit:'squat',emitY:.55,sway:.02,amount:2.3,rate:1.15,fall:1.15,events:['door'],marker:true,offset:[0,.12,0],step:true,intro:'洞是長的，前後要抓好。'},
- {name:'第 3 關｜兒童馬桶',file:'toilet_mini.glb',node:'Toilet_Mini',hit:'western',emitY:.62,sway:.03,amount:2.7,rate:1.3,fall:1.3,events:['blackout'],marker:false,doors:3,intro:'大人的屁股，小孩的馬桶。落點提示沒了。'},
- {name:'第 4 關｜歪掉的馬桶',file:'toilet_tilted.glb',node:'Toilet_Tilted',hit:'western',emitY:.85,sway:.04,amount:3.1,rate:1.45,fall:1.45,events:['door','blackout'],marker:false,intro:'到底是誰裝的啦。'},
- {name:'第 5 關｜只剩小便斗',file:'toilet_urinal.glb',node:'Toilet_Urinal',hit:'urinal',emitY:1.08,sway:.045,amount:3.5,rate:1.6,fall:1.6,events:['blackout','door'],marker:false,doors:4,offset:[0,0,-.24],intro:'沒得選了，瞄準那個小洞。'},
- {name:'第 6 關｜會跑的馬桶',file:'toilet_western.glb',node:'Toilet_Western',hit:'western',emitY:.82,sway:.055,amount:4.0,rate:1.8,fall:1.8,events:['door','blackout','door'],marker:false,moving:true,intro:'它會躲。'},
+ {name:'第 3 關｜兒童馬桶',file:'toilet_mini.glb',node:'Toilet_Mini',hit:'western',emitY:.62,sway:.03,amount:2.7,rate:1.3,fall:1.3,events:['blackout','ghost'],marker:false,doors:3,intro:'大人的屁股，小孩的馬桶。落點提示沒了。'},
+ {name:'第 4 關｜歪掉的馬桶',file:'toilet_tilted.glb',node:'Toilet_Tilted',hit:'western',emitY:.85,sway:.04,amount:3.1,rate:1.45,fall:1.45,events:['dog','snake','door'],marker:false,intro:'到底是誰裝的啦。'},
+ {name:'第 5 關｜只剩小便斗',file:'toilet_urinal.glb',node:'Toilet_Urinal',hit:'urinal',emitY:1.08,sway:.045,amount:3.5,rate:1.6,fall:1.6,events:['ghost','blackout','dog','door'],marker:false,doors:4,offset:[0,0,-.24],intro:'沒得選了，瞄準那個小洞。'},
+ {name:'第 6 關｜會跑的馬桶',file:'toilet_western.glb',node:'Toilet_Western',hit:'western',emitY:.82,sway:.055,amount:4.0,rate:1.8,fall:1.8,events:['dog','ghost','snake','door','blackout'],marker:false,moving:true,intro:'它會躲。'},
 ];
 const HIT={
  western:{rimY:.43,rx:.17,rz:.21,cz:0,outer:.06,waterY:.27},
@@ -167,7 +170,7 @@ const mb=document.createElement('button');mb.textContent='🔊';mb.style.cssText
 document.body.appendChild(mb);
 mb.addEventListener('pointerdown',e=>{e.stopPropagation();audio();music.muted=!music.muted;mb.textContent=music.muted?'🔇':'🔊';if(music.master)music.master.gain.value=music.muted?0:.2;});
 // ---------- voice ----------
-const VO={},VO_NAMES=['push1','push2','push3','huff','relief','forced','miss','perfect','occupied','knock','intruder','holddoor','blackout','lighton','tear','clean','nopaper','sock'];
+const VO={},VO_NAMES=['push1','push2','push3','huff','relief','forced','miss','perfect','occupied','knock','intruder','holddoor','blackout','lighton','tear','clean','nopaper','sock','ghost_ask','ghost_thanks','ghost_angry','scream','snake_see','bitten','snake_hit','dog_ask','dog_sit','dog_hit'];
 let voCool=0,voSrc=null,voLoaded=false;
 async function loadVoices(){if(voLoaded||!ac)return;voLoaded=true;
  await Promise.all(VO_NAMES.map(async n=>{try{const r=await fetch('voice/'+n+'.mp3');VO[n]=await ac.decodeAudioData(await r.arrayBuffer());}catch(e){}}));}
@@ -189,14 +192,19 @@ function setLights(f){lightF=f;const dark=f<.5;
  sun.intensity=1.7*f;hemiL.intensity=.55*f;scene.environmentIntensity=Math.max(.02,.55*f);
  for(const b of bakedMeshes)b.mesh.material=dark?b.lit:b.basic;
  flashlight.intensity=dark?7:0;}
-function scheduleEvents(){evQueue=(L.events||[]).map(type=>({type,at:.3+Math.random()*.45})).sort((a,b)=>b.at-a.at);ev=null;}
+const QS=new URLSearchParams(location.search);
+function scheduleEvents(){let types=(QS.get('ev')?QS.get('ev').split(','):(L.events||[])).slice();const n=types.length;
+ if(!QS.get('ev'))types.sort(()=>Math.random()-.5);
+ evQueue=types.map((type,i)=>({type,at:.88-i*(.58/Math.max(1,n))+(Math.random()-.5)*.05}));ev=null;}
 function startEvent(e){
+ if(extraStart(e))return;
  if(e.type==='door'){ev={type:'door',t:0,open:0,mash:0,need:4+li,phase:'knock'};knockSfx();say('knock',true);toast('叩叩叩！');}
  else{ev={type:'blackout',t:0,dur:4.5+li*.35};say('blackout',true);toast('停電了！');}}
 function mashDoor(){if(!ev||ev.type!=='door'||ev.phase!=='push')return;ev.mash++;ev.open=Math.max(0,ev.open-.2);if(ev.mash===1)say('holddoor',true);}
 function updateEvent(dt){
  if(!ev){if(evQueue.length&&stock/L.amount<=evQueue[0].at)startEvent(evQueue.shift());return;}
  ev.t+=dt;
+ if(ev.type==='ghost'||ev.type==='snake'||ev.type==='dog'){extraUpdate(dt);return;}
  if(ev.type==='door'){
   if(ev.phase==='knock'&&ev.t>.9){ev.phase='push';ev.t=0;$('#hold').classList.remove('hidden');}
   else if(ev.phase==='push'){ev.open+=dt/2.0;
@@ -210,7 +218,7 @@ function updateEvent(dt){
   const d=ev.dur;if(ev.t<.7)setLights(Math.random()<.5?1:.03);else if(ev.t<d)setLights(.03);
   else if(ev.t<d+.4)setLights(Math.random()<.5?1:.03);else{setLights(1);say('lighton');ev=null;}}
 }
-function clearEvents(){ev=null;evQueue=[];setLights(1);wedge.material.opacity=0;sil.material.opacity=0;doorSpot.intensity=0;$('#hold').classList.add('hidden');}
+function clearEvents(){ev=null;evQueue=[];if(typeof ghostG!=='undefined'){ghostG.visible=armG.visible=dogG.visible=snakeMesh.visible=snakeHead.visible=false;evBtns(null);$('#snakeT').classList.add('hidden');}setLights(1);wedge.material.opacity=0;sil.material.opacity=0;doorSpot.intensity=0;$('#hold').classList.add('hidden');}
 // ---------- wipe minigame ----------
 const W={on:false};const wc=$('#wc'),wx=wc.getContext('2d');let dirt=null,dx=null;
 function wipeSheets(){return [5,4,3,3,2,1][li]||1;}
@@ -226,6 +234,7 @@ function startWipe(hit){
   dx.beginPath();dx.ellipse((cx+Math.sin(a)*rr*.9)*k,(cy+R*.15+Math.cos(a)*rr*.6)*k,R*k*(.12+Math.random()*.22),R*k*(.08+Math.random()*.16),Math.random()*3,0,7);dx.fill();}
  dx.globalCompositeOperation='destination-in';peachPath(dx,k);dx.fill();dx.globalCompositeOperation='source-over';
  W.d0=dirtPx();W.left=W.d0;
+ {const tot=wipeSheets()-paperGiven;if(tot<=0){W.sheets=0;W.used=0;W.noPaper=true;setTimeout(()=>{if(W.on){say('sock',true);toast('衛生紙都借給阿飄了…只好用襪子');}},500);}else W.sheets=tot-1;}
 }
 function peachPath(c,k){c.beginPath();c.ellipse((W.cx-W.R*.6)*k,W.cy*k,W.R*k,W.R*1.05*k,0,0,7);c.ellipse((W.cx+W.R*.6)*k,W.cy*k,W.R*k,W.R*1.05*k,0,0,7);}
 function dirtPx(){const d=dx.getImageData(0,0,dirt.width,dirt.height).data;let n=0;for(let i=3;i<d.length;i+=16)if(d[i]>40)n++;return n;}
@@ -288,6 +297,127 @@ wcEl.addEventListener('pointerdown',e=>{if(!W.on)return;W.down=true;W.lx=e.clien
 wcEl.addEventListener('pointermove',e=>{if(!W.on)return;const n=performance.now();wipeMove(e.clientX,e.clientY,(n-wLastT)/1000);wLastT=n;});
 addEventListener('pointerup',()=>{W.down=false;});
 $('#wNew').addEventListener('click',()=>newSheet(false));$('#wDone').addEventListener('click',()=>{if(W.on&&!W.ended)finishWipe();});
+// ===== shared helpers =====
+function evBtns(h){const e=$('#evBtns');if(!h){e.classList.add('hidden');e.innerHTML='';return e;}e.innerHTML=h;e.classList.remove('hidden');
+ e.querySelectorAll('button').forEach(b=>b.addEventListener('pointerdown',x=>{x.stopPropagation();x.preventDefault();evAction(b.dataset.a);}));return e;}
+function flashC(c,o){const fl=$('#flash');fl.style.background=c;fl.style.opacity=o;setTimeout(()=>{fl.style.opacity=0;setTimeout(()=>fl.style.background='#fff',450);},140);}
+function scareSfx(){if(!ac)return;const t=ac.currentTime,o=ac.createOscillator(),g=ac.createGain();o.type='sawtooth';o.frequency.setValueAtTime(300,t);o.frequency.exponentialRampToValueAtTime(1800,t+.25);
+ g.gain.setValueAtTime(.5,t);g.gain.exponentialRampToValueAtTime(.001,t+.6);o.connect(g).connect(ac.destination);o.start(t);o.stop(t+.65);nzRaw(.5,3000,.5);}
+function nzRaw(dur,freq,gain){if(!ac||!music.noise)return;const t=ac.currentTime,s=ac.createBufferSource(),f=ac.createBiquadFilter(),v=ac.createGain();s.buffer=music.noise;f.type='bandpass';f.frequency.value=freq;
+ v.gain.setValueAtTime(gain,t);v.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(f).connect(v).connect(ac.destination);s.start(t);s.stop(t+dur+.02);}
+function hiss(){if(!ac||!music.noise)return;const t=ac.currentTime,s=ac.createBufferSource(),f=ac.createBiquadFilter(),v=ac.createGain();s.buffer=music.noise;f.type='highpass';f.frequency.value=5000;
+ v.gain.setValueAtTime(.001,t);v.gain.linearRampToValueAtTime(.35,t+.15);v.gain.exponentialRampToValueAtTime(.001,t+.7);s.connect(f).connect(v).connect(ac.destination);s.start(t);s.stop(t+.75);}
+function bark(){if(!ac)return;const t=ac.currentTime,o=ac.createOscillator(),f=ac.createBiquadFilter(),g=ac.createGain();o.type='square';o.frequency.setValueAtTime(1100+Math.random()*300,t);o.frequency.exponentialRampToValueAtTime(520,t+.07);
+ f.type='bandpass';f.frequency.value=1400;f.Q.value=2;g.gain.setValueAtTime(.4,t);g.gain.exponentialRampToValueAtTime(.001,t+.09);o.connect(f).connect(g).connect(ac.destination);o.start(t);o.stop(t+.1);}
+function hurt(p,msg){patience=Math.max(0,patience-p);shake=.8;toast(msg);if(patience<=0){clearEvents();gameOver('忍耐值歸零……');return true;}return false;}
+
+// ===== 衛生紙阿飄 (original ghost) =====
+let paperGiven=0;
+const ghostG=new THREE.Group(),armG=new THREE.Group();ghostG.visible=armG.visible=false;scene.add(ghostG,armG);
+{const gm=new THREE.MeshPhysicalMaterial({color:0xf3f5ee,roughness:.85,transparent:true,opacity:.9,emissive:0x99ffcc,emissiveIntensity:.18,side:THREE.DoubleSide});
+ const pts=[];for(let i=0;i<=24;i++){const u=i/24,y=u*.8;const r=u<.62?.2-u*.07:Math.sqrt(Math.max(0,1-((u-.62)/.38)**2))*.157;pts.push(new THREE.Vector2(Math.max(.002,r),y));}
+ const bg=new THREE.LatheGeometry(pts,40),p=bg.attributes.position;
+ for(let i=0;i<p.count;i++)if(p.getY(i)<.02){const a=Math.atan2(p.getZ(i),p.getX(i));p.setY(i,-.04-.04*Math.sin(a*7));}
+ bg.computeVertexNormals();const body=new THREE.Mesh(bg,gm);body.castShadow=true;ghostG.add(body);
+ const paperM=new THREE.MeshStandardMaterial({color:0xfffdf2,roughness:.9});
+ const hp2=[];for(let i=0;i<=80;i++){const u=i/80,a=u*Math.PI*7,y=.03+u*.5,r=.2-(y/.8)*.07+.008;hp2.push(new THREE.Vector3(Math.cos(a)*r,y,Math.sin(a)*r));}
+ ghostG.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(hp2),240,.012,6,false),paperM));
+ const sp=[];for(let i=0;i<=20;i++){const u=i/20;sp.push(new THREE.Vector3(.14+u*.28,.04+Math.sin(u*6)*.04,-.05-u*.18));}
+ ghostG.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(sp),60,.013,5,false),paperM));
+ const black=new THREE.MeshBasicMaterial({color:0x050505});
+ for(const sx of[-1,1]){const e=new THREE.Mesh(new THREE.SphereGeometry(.03,16,12),black);e.scale.set(1,1.5,.35);e.position.set(sx*.055,.66,.135);ghostG.add(e);}
+ const mo=new THREE.Mesh(new THREE.SphereGeometry(.035,16,12),black);mo.scale.set(1,.75,.3);mo.position.set(0,.555,.148);ghostG.add(mo);
+ const roll=new THREE.Mesh(new THREE.CylinderGeometry(.065,.065,.085,24),paperM);roll.position.set(.01,.82,0);roll.rotation.z=.15;ghostG.add(roll);
+ const core=new THREE.Mesh(new THREE.CylinderGeometry(.024,.024,.088,16),new THREE.MeshStandardMaterial({color:0x8a6a45}));core.position.copy(roll.position);core.rotation.z=.15;ghostG.add(core);
+ for(const sx of[-1,1]){const c=new THREE.CatmullRomCurve3([new THREE.Vector3(sx*.15,.48,0),new THREE.Vector3(sx*.18,.42,.16),new THREE.Vector3(sx*.12,.4,.32)]);
+  ghostG.add(new THREE.Mesh(new THREE.TubeGeometry(c,16,.022,8,false),gm));const h=new THREE.Mesh(new THREE.SphereGeometry(.033,12,10),gm);h.position.set(sx*.12,.4,.33);ghostG.add(h);}
+ const am=new THREE.Mesh(new THREE.CylinderGeometry(.018,.022,.6,10).rotateZ(Math.PI/2),gm);am.position.set(-.3,0,0);armG.add(am);
+ const hand=new THREE.Mesh(new THREE.SphereGeometry(.03,12,10),gm);hand.scale.set(1.2,.55,1);armG.add(hand);
+ for(let k=0;k<4;k++){const fi=new THREE.Mesh(new THREE.CylinderGeometry(.006,.005,.05,6).rotateZ(Math.PI/2),gm);fi.geometry.translate(.025,0,0);fi.position.set(.02,0,-.021+k*.014);fi.userData.f=1;armG.add(fi);}
+ const pap=new THREE.Mesh(new THREE.BoxGeometry(.07,.004,.08),paperM);pap.position.set(.03,.012,0);pap.visible=false;armG.add(pap);armG.userData.paper=pap;}
+
+// ===== 馬桶蛇 =====
+const snakeMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.35});
+const snakeMesh=new THREE.Mesh(new THREE.BufferGeometry(),snakeMat);snakeMesh.castShadow=true;snakeMesh.visible=false;
+const snakeHead=new THREE.Group();snakeHead.visible=false;
+{const hm=new THREE.MeshStandardMaterial({color:0x3d8a35,roughness:.35});const hd=new THREE.Mesh(new THREE.SphereGeometry(.03,20,14),hm);hd.scale.set(1,.7,1.45);hd.castShadow=true;snakeHead.add(hd);
+ for(const sx of[-1,1]){const e=new THREE.Mesh(new THREE.SphereGeometry(.008,8,6),new THREE.MeshBasicMaterial({color:0xffe24a}));e.position.set(sx*.02,.013,.022);snakeHead.add(e);
+  const pu=new THREE.Mesh(new THREE.SphereGeometry(.0035,6,4),new THREE.MeshBasicMaterial({color:0}));pu.position.set(sx*.0215,.016,.028);snakeHead.add(pu);}
+ const tg=new THREE.Mesh(new THREE.CylinderGeometry(.0022,.0022,.045,4).rotateX(Math.PI/2),new THREE.MeshBasicMaterial({color:0xd0203a}));tg.geometry.translate(0,0,.022);tg.position.set(0,-.005,.04);snakeHead.add(tg);snakeHead.userData.tongue=tg;}
+function snakeBuild(e){
+ if(snakeMesh.parent!==node){node.add(snakeMesh);node.add(snakeHead);}
+ const n=14,pts=[],tgt=e.lunge>0?node.worldToLocal(emitter.clone()):null;
+ for(let i=0;i<n;i++){const u=i/(n-1);const p=new THREE.Vector3(e.sx+Math.sin(u*Math.PI*2.2+t*5)*.03*(1-u*.4),hp.waterY-.07+u*e.h,e.sz+u*.035);if(tgt)p.lerp(tgt,u*u*e.lunge);pts.push(p);}
+ const g=new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),40,.017,8,false);
+ const col=[],cc=new THREE.Color();for(let i=0;i<=40;i++)for(let j=0;j<=8;j++){cc.set(((i>>1)%2)?0x2f6e2a:0x5aa848);col.push(cc.r,cc.g,cc.b);}
+ g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));snakeMesh.geometry.dispose();snakeMesh.geometry=g;
+ const end=pts[n-1],dir=end.clone().sub(pts[n-2]).normalize().add(new THREE.Vector3(0,0,.7));
+ snakeHead.position.copy(end);snakeHead.lookAt(node.localToWorld(end.clone().add(dir)));
+ snakeHead.userData.tongue.scale.z=Math.sin(t*22)>.2?1:.2;
+ snakeMesh.visible=snakeHead.visible=e.h>.005;}
+
+// ===== 吉娃娃 =====
+const dogG=new THREE.Group();dogG.visible=false;scene.add(dogG);
+{const tan=new THREE.MeshStandardMaterial({color:0xd9a066,roughness:.7}),dark=new THREE.MeshBasicMaterial({color:0x111111}),pink=new THREE.MeshStandardMaterial({color:0xf2a0a8,roughness:.6});
+ const body=new THREE.Mesh(new THREE.SphereGeometry(.05,16,12),tan);body.scale.set(.8,.75,1.35);body.position.y=.075;dogG.add(body);
+ const head=new THREE.Group();head.position.set(0,.13,.065);dogG.add(head);dogG.userData.head=head;
+ const hs=new THREE.Mesh(new THREE.SphereGeometry(.042,18,14),tan);hs.scale.set(1.05,.95,1);head.add(hs);
+ const sn=new THREE.Mesh(new THREE.SphereGeometry(.018,12,10),tan);sn.scale.set(1,.8,1.3);sn.position.set(0,-.012,.038);head.add(sn);
+ const no=new THREE.Mesh(new THREE.SphereGeometry(.007,8,6),dark);no.position.set(0,-.006,.061);head.add(no);
+ const tongue=new THREE.Mesh(new THREE.SphereGeometry(.008,8,6),pink);tongue.scale.set(1,.4,1.6);tongue.position.set(0,-.026,.045);head.add(tongue);
+ for(const sx of[-1,1]){const e=new THREE.Mesh(new THREE.SphereGeometry(.012,12,10),dark);e.position.set(sx*.02,.006,.033);head.add(e);
+  const gl=new THREE.Mesh(new THREE.SphereGeometry(.0035,6,4),new THREE.MeshBasicMaterial({color:0xffffff}));gl.position.set(sx*.02+.004,.012,.044);head.add(gl);
+  const ear=new THREE.Mesh(new THREE.ConeGeometry(.025,.065,12),tan);ear.position.set(sx*.034,.047,-.005);ear.rotation.z=-sx*.6;head.add(ear);
+  const ei=new THREE.Mesh(new THREE.ConeGeometry(.016,.05,12),pink);ei.position.set(sx*.033,.045,.004);ei.rotation.z=-sx*.6;head.add(ei);}
+ const legs=[];for(const [lx,lz] of [[-.025,.045],[.025,.045],[-.025,-.045],[.025,-.045]]){const l=new THREE.Mesh(new THREE.CylinderGeometry(.007,.006,.06,8),tan);l.geometry.translate(0,-.03,0);l.position.set(lx,.06,lz);dogG.add(l);legs.push(l);}
+ dogG.userData.legs=legs;
+ const tail=new THREE.Mesh(new THREE.CylinderGeometry(.004,.007,.05,6),tan);tail.geometry.translate(0,.025,0);tail.position.set(0,.09,-.06);tail.rotation.x=-.8;dogG.add(tail);dogG.userData.tail=tail;
+ dogG.traverse(o=>{if(o.isMesh)o.castShadow=true;});dogG.scale.setScalar(1.25);}
+function dogHit(){if(!ev||ev.type!=='dog'||ev.phase==='leave')return;say('dog_hit',true);toast('砸到吉娃娃了……');ev.phase='leave';evBtns(null);}
+
+// ===== event actions =====
+function evAction(a){if(!ev)return;
+ if(a==='give'&&ev.type==='ghost'&&ev.phase==='reach'){paperGiven++;ev.phase='thanks';ev.t=0;armG.userData.paper.visible=true;say('ghost_thanks',true);toast('借她一張（擦屁股時少一張）');evBtns(null);}
+ else if(a==='ignore'&&ev.type==='ghost'&&ev.phase==='reach'){ev.phase='rise';ev.t=0;say('ghost_angry',true);evBtns(null);}
+ else if(a==='sit'&&ev.type==='dog'&&ev.phase==='run'){ev.calm++;bark();if(ev.calm>=4){ev.phase='sit';ev.t=0;say('dog_sit',true);toast('乖～');evBtns(null);}}}
+function extraStart(e){
+ if(e.type==='ghost'){ev={type:'ghost',t:0,phase:'reach'};armG.visible=true;armG.userData.paper.visible=false;armG.position.set(-.62,.03,.12);setLights(.25);say('ghost_ask',true);
+  evBtns('<button class="eb" data-a="give" style="background:#8aa0b8">🧻 借她一張</button><button class="eb" data-a="ignore" style="background:#6a4c7a">🙅 不理她</button>');return true;}
+ if(e.type==='snake'){const tt=stock/(L.rate*(.15+.75*.72))+.4;ev={type:'snake',t:0,phase:'rise',h:0,lunge:0,T:Math.max(2,tt),sx:(node.worldToLocal(emitter.clone()).x>0?-1:1)*hp.rx*(.4+Math.random()*.15),sz:hp.half?hp.cz-.07:hp.cz+(Math.random()-.5)*hp.rz*.5,hiss:0};
+  say('snake_see',true);hiss();toast('🐍 馬桶裡有蛇！');return true;}
+ if(e.type==='dog'){ev={type:'dog',t:0,phase:'enter',calm:0,ang:Math.PI/2,bk:0};dogG.visible=true;dogG.position.set(0,0,1.2);say('dog_ask',true);bark();
+  evBtns('<button class="eb" data-a="sit" style="background:#c8873a">🦴 乖！坐下（連按）</button>');return true;}
+ return false;}
+function extraUpdate(dt){
+ if(ev.type==='ghost'){
+  if(ev.phase==='reach'){armG.position.x=Math.min(-.3,-.62+ev.t*.18);armG.children.forEach(c=>{if(c.userData.f)c.rotation.y=Math.sin(t*9+c.position.z*200)*.35;});
+   if(ev.t>3.5){ev.phase='rise';ev.t=0;say('ghost_angry',true);evBtns(null);}}
+  else if(ev.phase==='thanks'){armG.position.x=-.3-ev.t*.3;if(ev.t>1.3){armG.visible=false;setLights(1);ev=null;}}
+  else if(ev.phase==='rise'){armG.position.x=-.3-ev.t*.4;if(ev.t>.6)armG.visible=false;ghostG.visible=true;
+   ghostG.position.set(-.3,-.85+Math.min(1,ev.t/1.6)*.95+Math.sin(t*3)*.02,.12);ghostG.scale.setScalar(1);
+   ghostG.lookAt(camera.position.x,ghostG.position.y,camera.position.z);setLights(Math.random()<.85?.25:.05);
+   if(ev.t>1.9){ev.phase='lunge';ev.t=0;}}
+  else if(ev.phase==='lunge'){const k=Math.min(1,ev.t/.35);ghostG.position.lerpVectors(new THREE.Vector3(-.3,.1,.12),new THREE.Vector3(0,.72,.12),k);ghostG.scale.setScalar(1+k*.5);ghostG.lookAt(camera.position);
+   if(k>=1){scareSfx();say('scream',true);flashC('#fff',.95);ghostG.visible=false;setLights(1);ev=null;hurt(25,'被阿飄嚇到漏了一點……');}}}
+ else if(ev.type==='snake'){
+  if(ev.phase==='rise'){ev.h=Math.min(.17,ev.h+dt*.3);if(ev.h>=.17)ev.phase='wait';}
+  else if(ev.phase==='wait'){ev.T-=dt;ev.hiss-=dt;if(ev.hiss<=0){hiss();ev.hiss=1.4;}
+   const el=$('#snakeT');el.classList.remove('hidden');el.textContent='🐍 '+Math.max(0,ev.T).toFixed(1);el.style.color=ev.T<1.5?'#ff5a5a':'#9dff7a';
+   if(stock<=0){ev.phase='retreat';toast('烙完了！蛇縮回去了');el.classList.add('hidden');}
+   else if(ev.T<=0){ev.phase='lunge';el.classList.add('hidden');hiss();}}
+  else if(ev.phase==='lunge'){ev.lunge=Math.min(1,ev.lunge+dt*3.2);if(ev.lunge>=1){say('bitten',true);scareSfx();flashC('#c0202a',.6);target.z+=.15;ev.phase='retreat';if(hurt(30,'桃子被咬了一口！'))return;}}
+  else if(ev.phase==='retreat'){ev.lunge=Math.max(0,ev.lunge-dt*3);ev.h=Math.max(0,ev.h-dt*.35);if(ev.h<=0){snakeMesh.visible=snakeHead.visible=false;$('#snakeT').classList.add('hidden');ev=null;return;}}
+  if(ev)snakeBuild(ev);}
+ else if(ev.type==='dog'){
+  const d=dogG,legs=d.userData.legs;let speed=0;
+  if(ev.phase==='enter'){d.position.z-=dt*1.6;speed=1;d.rotation.y=Math.PI;if(d.position.z<=.4){ev.phase='run';ev.t=0;}}
+  else if(ev.phase==='run'){ev.ang+=dt*4.2;const R=.36;d.position.set(Math.cos(ev.ang)*R,Math.abs(Math.sin(t*14))*.035,.06+Math.sin(ev.ang)*R*.9);
+   d.rotation.y=-ev.ang;speed=1;ev.bk-=dt;if(ev.bk<=0){bark();ev.bk=.18+Math.random()*.35;}if(ev.t>6.5){ev.phase='leave';evBtns(null);}}
+  else if(ev.phase==='sit'){d.position.y=0;d.lookAt(camera.position.x,0,camera.position.z);legs[2].rotation.x=legs[3].rotation.x=-1.2;d.userData.tail.rotation.x=-.8+Math.sin(t*25)*.6;if(ev.t>1.4){ev.phase='leave';}}
+  else if(ev.phase==='leave'){legs[2].rotation.x=legs[3].rotation.x=0;d.position.y=Math.abs(Math.sin(t*16))*.03;
+   const dz=1.3-d.position.z,dx=-d.position.x;d.rotation.y=Math.atan2(dx,dz);d.position.x+=Math.sign(dx)*Math.min(Math.abs(dx),dt*1.5);d.position.z+=dt*1.8;speed=1;if(d.position.z>1.25){d.visible=false;evBtns(null);ev=null;return;}}
+  if(speed&&ev&&ev.phase!=='sit')legs.forEach((l,i)=>l.rotation.x=Math.sin(t*28+(i%2?Math.PI:0)+(i>1?Math.PI/2:0))*.7);
+  d.userData.head.rotation.z=Math.sin(t*9)*.15;}}
 let toastT=0;function toast(s){const e=$('#toast');e.textContent=s;e.style.opacity=1;toastT=1.4;}
 
 // ---------- levels ----------
@@ -305,7 +435,7 @@ async function startLevel(i){
  stock=L.amount;acc=0;power=0;forced=0;idle=0;endTimer=0;
  gyro.b0=gyro.on?gyro.b:null;smooth.set(0,L.emitY,.05);target.copy(smooth);emitter.copy(smooth);
  camera.position.set(0,1.55,.28);camera.lookAt(0,.2,-.05);
- scheduleEvents();clearEvents();scheduleEvents();missSaid=false;relSaid=false;chunks=0;$('#lvl').textContent=L.name+(li>0?'　'+'🔥'.repeat(Math.min(3,Math.ceil(li/2))):'');state='play';hideMsg();toast(L.intro.split('。')[0]);
+ scheduleEvents();clearEvents();scheduleEvents();missSaid=false;relSaid=false;chunks=0;paperGiven=0;$('#lvl').textContent=L.name+(li>0?'　'+'🔥'.repeat(Math.min(3,Math.ceil(li/2))):'');state='play';hideMsg();toast(L.intro.split('。')[0]);
 }
 function floorAt(x,z){return (L&&L.step&&Math.abs(x)<.35&&Math.abs(z)<.55)?.12:0;}
 
@@ -354,6 +484,7 @@ function physics(){
      else if(e2<1){o.state='rim';lv.y=hp.rimY+s.r*.5;o.local=lv.clone();o.p.copy(node.localToWorld(lv.clone()));if(Math.random()<.3)splat();continue;}
     }
     o.prevL=lv.y;
+    if(ev&&ev.type==='dog'&&ev.phase!=='leave'&&o.p.y<.22&&Math.hypot(o.p.x-dogG.position.x,o.p.z-dogG.position.z)<.08){o.p.y=s.r*.5;o.state='miss';dogHit();continue;}
     const fy=floorAt(o.p.x,o.p.z);
     if(o.state==='free'&&o.p.y<=fy+s.r*.5){o.p.y=fy+s.r*.5;o.state='miss';if(!missSaid&&Math.random()<.5){missSaid=true;say('miss');}if(Math.random()<.35)splat();continue;}
    }
@@ -361,6 +492,7 @@ function physics(){
     const dx=lv.x/hp.rx,dz=(lv.z-hp.cz)/hp.rz,e=dx*dx+dz*dz;
     if(e>.6){const f=Math.sqrt(.6/e);lv.x*=f;lv.z=hp.cz+(lv.z-hp.cz)*f;}
     if(hp.half&&lv.z>hp.cz-.01)lv.z=hp.cz-.01;
+    if(ev&&ev.type==='snake'&&ev.phase==='wait'&&Math.hypot(lv.x-ev.sx,lv.z-(ev.sz+.035))<.04&&lv.y<hp.waterY+ev.h){ev.phase='retreat';say('snake_hit',true);toast('命中蛇頭！蛇嚇跑了 🎯');$('#snakeT').classList.add('hidden');}
     if(lv.y<=o.restY){lv.y=o.restY;o.state='water';waterCount++;o.local=lv.clone();
      if(!s.splashed){s.splashed=true;splash(node.localToWorld(lv.clone()));plop();}}
     o.p.copy(node.localToWorld(lv.clone()));
@@ -415,8 +547,8 @@ if(matchMedia('(pointer:coarse)').matches)pb.style.display='block';
 function showMsg(h){const m=$('#msg');m.innerHTML=h;m.classList.remove('hidden');}
 function hideMsg(){$('#msg').classList.add('hidden');}
 function menu(){clearEvents();state='menu';patience=100;
- showMsg(`<h1>💩 烙賽模擬器</h1><p>移動滑鼠（手機：拖曳畫面）控制屁股位置，<br>按住滑鼠／空白鍵／「用力」鈕出力。<br>📱 手機會用陀螺儀：傾斜手機就能移動桃子（每關開始時的角度會當作中心）。<br>力道在<b style="color:#7be39a">綠區</b>最穩，太大會噴射，太久不出力會憋不住。<br>越後面量越多、掉越快、晃越大。<br>小心有人推門（連按 E／頂住門鈕）和停電！<br>烙完還要擦屁股：太用力會擦破喔。</p><button class="go" id="go">開始烙賽</button>`);
- $('#go').onclick=()=>{audio();enableGyro();enter(0);};}
+ showMsg(`<h1>💩 烙賽模擬器</h1><p>移動滑鼠（手機：拖曳畫面）控制屁股位置，<br>按住滑鼠／空白鍵／「用力」鈕出力。<br>📱 手機會用陀螺儀：傾斜手機就能移動桃子（每關開始時的角度會當作中心）。<br>力道在<b style="color:#7be39a">綠區</b>最穩，太大會噴射，太久不出力會憋不住。<br>越後面量越多、掉越快、晃越大。<br>小心有人推門（連按 E）、停電、阿飄借衛生紙、馬桶蛇、瘋狂吉娃娃！<br>烙完還要擦屁股：太用力會擦破喔。</p><button class="go" id="go">開始烙賽</button>`);
+ $('#go').onclick=()=>{audio();enableGyro();enter(+(QS.get('lv')||0));};}
 function enter(i){const lv=LEVELS[i];if(lv.doors)doorPick(i);else startLevel(i);}
 function doorPick(i){state='doors';const n=LEVELS[i].doors,free=Math.floor(Math.random()*n);
  let h=`<h1>全滿了！</h1><p>${LEVELS[i].name}<br>每間都關著，猜哪一間有空？猜錯會扣忍耐值。</p><div id="doors">`;
@@ -461,7 +593,7 @@ function frame(){
   if(idle>5){forced=1.3;idle=0;toast('憋不住了！！');say('forced',true);}
   if(gyro.on){target.x=clamp(gyro.g/26*.42,-.42,.42);target.z=clamp(.05+(gyro.b-gyro.b0)/26*.5,-.42,.75);}
   smooth.x+=(target.x-smooth.x)*Math.min(1,dt*6);smooth.z+=(target.z-smooth.z)*Math.min(1,dt*6);
-  const sw=L.sway*(1+power*1.5);
+  const sw=(L.sway+(ev&&ev.type==='dog'&&ev.phase==='run'?.05:0))*(1+power*1.5);
   emitter.set(smooth.x+sw*(Math.sin(t*1.7)+.6*Math.sin(t*3.3+1)),L.emitY,smooth.z+sw*(Math.sin(t*1.3+2)+.5*Math.sin(t*2.9)));
   const band=power>.85?3:power>.6?2:power>.25?1:0;if(band>powBand)say('push'+band,band===3);else if(band===0&&powBand>=2&&Math.random()<.4)say('huff');powBand=band;
   updateEvent(dt);if(state!=='play')return requestAnimationFrame(frame);
