@@ -170,7 +170,7 @@ const mb=document.createElement('button');mb.textContent='🔊';mb.style.cssText
 document.body.appendChild(mb);
 mb.addEventListener('pointerdown',e=>{e.stopPropagation();audio();music.muted=!music.muted;mb.textContent=music.muted?'🔇':'🔊';if(music.master)music.master.gain.value=music.muted?0:.2;});
 // ---------- voice ----------
-const VO={},VO_NAMES=['push1','push2','push3','huff','relief','forced','miss','perfect','occupied','knock','intruder','holddoor','blackout','lighton','tear','clean','nopaper','sock','ghost_ask','ghost_thanks','ghost_angry','scream','snake_see','bitten','snake_hit','dog_ask','dog_sit','dog_hit'];
+const VO={},VO_NAMES=['push1','push2','push3','huff','relief','forced','miss','perfect','occupied','knock','intruder','holddoor','blackout','lighton','tear','clean','nopaper','sock','ghost_ask','ghost_thanks','ghost_angry','scream','snake_see','bitten','snake_hit','dog_ask','dog_sit','dog_hit','champion'];
 let voCool=0,voSrc=null,voLoaded=false;
 async function loadVoices(){if(voLoaded||!ac)return;voLoaded=true;
  await Promise.all(VO_NAMES.map(async n=>{try{const r=await fetch('voice/'+n+'.mp3');VO[n]=await ac.decodeAudioData(await r.arrayBuffer());}catch(e){}}));}
@@ -566,9 +566,9 @@ function endLevel(){
  const tot=w+r+m||1,pct=Math.round(w/tot*100),pass=pct>=60;if(pct>=90)say('perfect',true);
  startWipe({pct,pass,r,m,chunks});}
 function showResult(hit,wp){state='result';const {pct,pass,r,m}=hit;
- const last=li===LEVELS.length-1;
+ const last=li===LEVELS.length-1;if(pass&&last)setTimeout(()=>say('champion',true),400);
  
- showMsg(`<h1>${pass?(pct>=90?'完美入洞！':'過關'):'噴得到處都是……'}</h1>
+ showMsg(`<h1>${pass&&last?'🏆 全破！<br>我很會大便！！讚 👍':pass?(pct>=90?'完美入洞！':'過關'):'噴得到處都是……'}</h1>
  <p>命中率 <b>${pct}%</b><br>${r?`坐墊中獎 ${r} 段　`:''}${m?`地板 ${m} 段`:''}${(!r&&!m)?'一滴不漏':''}</p><p style="margin-top:-6px">🧻 擦屁股評分 <b style="font-size:26px;color:#ffd36b">${wp.grade}</b>（${wp.sc} 分）<br>${wp.title}<br><span style="font-size:13px;opacity:.8">乾淨度 ${Math.round(wp.clean*100)}%・用了 ${wp.used} 張${wp.tears?`・擦破 ${wp.tears} 次`:''}</span></p>
  <button class="go" id="go">${pass?(last?'全破！再玩一次':'下一間'):'重來這間'}</button>`);
  $('#go').onclick=()=>{if(!pass)startLevel(li);else if(last)menu();else enter(li+1);};
