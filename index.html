@@ -25,6 +25,16 @@ canvas{display:block}
 .door::after{content:"";position:absolute;right:8px;top:55%;width:8px;height:8px;border-radius:50%;background:#ddd}
 .door.occ{background:#9c3a3a;border-color:#6b2222}
 .hidden{display:none!important}
+#hold{position:fixed;left:50%;bottom:calc(30px + env(safe-area-inset-bottom));transform:translateX(-50%);padding:16px 26px;border-radius:16px;border:none;background:#e0484a;color:#fff;font-size:22px;font-weight:800;box-shadow:0 6px 0 #8f2224;z-index:6;animation:shake .15s infinite}
+@keyframes shake{0%{transform:translateX(-50%) rotate(-2deg)}50%{transform:translateX(-50%) rotate(2deg)}100%{transform:translateX(-50%) rotate(-2deg)}}
+#flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .4s;z-index:4}
+#wipeUI{position:fixed;inset:0;z-index:8;background:#2a1d18}
+#wipeUI canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+#wipeTop{position:absolute;left:0;right:0;top:0;padding:14px;color:#fff;text-align:center;pointer-events:none;text-shadow:0 1px 3px #000}
+#wipeTop h2{margin:0 0 6px;font-size:24px}
+#wipeTop .r{display:flex;justify-content:center;gap:16px;font-size:14px}
+#wipeBtns{position:absolute;left:0;right:0;bottom:calc(20px + env(safe-area-inset-bottom));display:flex;justify-content:center;gap:12px}
+#wipeBtns button{font-size:17px;padding:12px 20px;border-radius:24px;border:none;font-weight:700;color:#fff}
 </style></head><body>
 <div id="hud"><div id="lvl"></div>
 <div class="row"><span>肚子存量</span><span id="stockT"></span></div><div class="bar"><i id="stockB" style="background:#c8873a"></i></div>
@@ -33,7 +43,12 @@ canvas{display:block}
 </div>
 <div id="powtxt">力道</div><div id="power"><div class="zone"></div><div class="lvl"></div></div>
 <button id="push">用力</button>
-<div id="toast"></div>
+<div id="toast"></div><div id="flash"></div>
+<button id="hold" class="hidden">🚪 頂住門！連按</button>
+<div id="wipeUI" class="hidden"><canvas id="wc"></canvas>
+<div id="wipeTop"><h2>🧻 擦屁股！</h2><div class="r"><span id="wTime"></span><span id="wSheets"></span><span id="wClean"></span></div>
+<div class="bar" style="width:200px;margin:8px auto 0"><i id="wStress" style="background:#ff6b6b"></i></div><div style="font-size:12px">紙張壓力（太快會破）</div></div>
+<div id="wipeBtns"><button id="wNew" style="background:#7a8b99">換一張</button><button id="wDone" style="background:#5caa6a">穿褲子 ✓</button></div></div>
 <div id="msg"></div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
 <script type="module">
@@ -56,7 +71,7 @@ scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;scene.envi
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
 function fitCam(){camera.aspect=innerWidth/innerHeight;camera.fov=camera.aspect<1?72:52;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}
 addEventListener('resize',fitCam);fitCam();
-scene.add(new THREE.HemisphereLight(0xf2fff0,0x404840,0.55));
+const hemiL=new THREE.HemisphereLight(0xf2fff0,0x404840,0.55);scene.add(hemiL);
 const sun=new THREE.DirectionalLight(0xf4fff0,1.7);sun.position.set(0.25,2.5,0.7);sun.castShadow=true;
 sun.shadow.mapSize.set(1024,1024);Object.assign(sun.shadow.camera,{left:-.8,right:.8,top:.8,bottom:-.8,near:.5,far:4});sun.shadow.bias=-0.0006;
 scene.add(sun);
@@ -65,19 +80,20 @@ catcher.position.set(0,.003,.35);catcher.receiveShadow=true;scene.add(catcher);
 
 const loader=new GLTFLoader();const cache={};
 async function loadGLB(f){if(!cache[f])cache[f]=await loader.loadAsync('models/'+f);return cache[f].scene.clone(true);}
+const bakedMeshes=[];
 const stall=(await loader.loadAsync('models/stall.glb')).scene;
-stall.traverse(o=>{if(o.isMesh){const m=o.material;if(m.name&&m.name.endsWith('_Bake')){o.material=new THREE.MeshBasicMaterial({map:m.map,toneMapped:false});}else{o.castShadow=o.receiveShadow=true;}}});
+stall.traverse(o=>{if(o.isMesh){const m=o.material;if(m.name&&m.name.endsWith('_Bake')){const basic=new THREE.MeshBasicMaterial({map:m.map,toneMapped:false}),lit=new THREE.MeshLambertMaterial({map:m.map});o.material=basic;o.receiveShadow=true;bakedMeshes.push({mesh:o,basic,lit});}else{o.castShadow=o.receiveShadow=true;}}});
 scene.add(stall);
 
 // ---------- game data ----------
 const SEG=0.022,H=1/120,G=-9.8,TOTAL=1.8;
 const LEVELS=[
  {name:'第 1 關｜標準坐式',file:'toilet_western.glb',node:'Toilet_Western',hit:'western',emitY:.82,sway:0,amount:1.8,rate:1,fall:1,marker:true,intro:'先熱身。移動屁股對準，按住出力。'},
- {name:'第 2 關｜蹲式茅坑',file:'toilet_squat.glb',node:'Toilet_Squat',hit:'squat',emitY:.55,sway:.02,amount:2.3,rate:1.15,fall:1.15,marker:true,offset:[0,.12,0],step:true,intro:'洞是長的，前後要抓好。'},
- {name:'第 3 關｜兒童馬桶',file:'toilet_mini.glb',node:'Toilet_Mini',hit:'western',emitY:.62,sway:.03,amount:2.7,rate:1.3,fall:1.3,marker:false,doors:3,intro:'大人的屁股，小孩的馬桶。落點提示沒了。'},
- {name:'第 4 關｜歪掉的馬桶',file:'toilet_tilted.glb',node:'Toilet_Tilted',hit:'western',emitY:.85,sway:.04,amount:3.1,rate:1.45,fall:1.45,marker:false,intro:'到底是誰裝的啦。'},
- {name:'第 5 關｜只剩小便斗',file:'toilet_urinal.glb',node:'Toilet_Urinal',hit:'urinal',emitY:1.08,sway:.045,amount:3.5,rate:1.6,fall:1.6,marker:false,doors:4,offset:[0,0,-.24],intro:'沒得選了，瞄準那個小洞。'},
- {name:'第 6 關｜會跑的馬桶',file:'toilet_western.glb',node:'Toilet_Western',hit:'western',emitY:.82,sway:.055,amount:4.0,rate:1.8,fall:1.8,marker:false,moving:true,intro:'它會躲。'},
+ {name:'第 2 關｜蹲式茅坑',file:'toilet_squat.glb',node:'Toilet_Squat',hit:'squat',emitY:.55,sway:.02,amount:2.3,rate:1.15,fall:1.15,events:['door'],marker:true,offset:[0,.12,0],step:true,intro:'洞是長的，前後要抓好。'},
+ {name:'第 3 關｜兒童馬桶',file:'toilet_mini.glb',node:'Toilet_Mini',hit:'western',emitY:.62,sway:.03,amount:2.7,rate:1.3,fall:1.3,events:['blackout'],marker:false,doors:3,intro:'大人的屁股，小孩的馬桶。落點提示沒了。'},
+ {name:'第 4 關｜歪掉的馬桶',file:'toilet_tilted.glb',node:'Toilet_Tilted',hit:'western',emitY:.85,sway:.04,amount:3.1,rate:1.45,fall:1.45,events:['door','blackout'],marker:false,intro:'到底是誰裝的啦。'},
+ {name:'第 5 關｜只剩小便斗',file:'toilet_urinal.glb',node:'Toilet_Urinal',hit:'urinal',emitY:1.08,sway:.045,amount:3.5,rate:1.6,fall:1.6,events:['blackout','door'],marker:false,doors:4,offset:[0,0,-.24],intro:'沒得選了，瞄準那個小洞。'},
+ {name:'第 6 關｜會跑的馬桶',file:'toilet_western.glb',node:'Toilet_Western',hit:'western',emitY:.82,sway:.055,amount:4.0,rate:1.8,fall:1.8,events:['door','blackout','door'],marker:false,moving:true,intro:'它會躲。'},
 ];
 const HIT={
  western:{rimY:.43,rx:.17,rz:.21,cz:0,outer:.06,waterY:.27},
@@ -85,7 +101,7 @@ const HIT={
  urinal:{rimY:.62,rx:.15,rz:.15,cz:-.02,outer:.04,waterY:.47,half:true},
 };
 let L=null,li=0,hp=null,model=null,node=null,stepMesh=null,state='menu',t=0;
-let power=0,pushing=false,forced=0,idle=0,stock=TOTAL,acc=0,patience=100,endTimer=0;
+let missSaid=false,relSaid=false,chunks=0,powBand=0;let power=0,pushing=false,forced=0,idle=0,stock=TOTAL,acc=0,patience=100,endTimer=0;
 const strands=[];let active=null;
 const emitter=new THREE.Vector3(),smooth=new THREE.Vector3(),target=new THREE.Vector3();
 const poopMat=new THREE.MeshPhysicalMaterial({color:0x5a3317,roughness:.42,clearcoat:.6,clearcoatRoughness:.35});
@@ -125,10 +141,10 @@ function mtof(m){return 440*Math.pow(2,(m-69)/12);}
 function musicStart(){if(!ac||music.on)return;music.on=true;
  music.master=ac.createGain();music.master.gain.value=music.muted?0:.2;music.master.connect(ac.destination);
  const b=ac.createBuffer(1,ac.sampleRate*.5,ac.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;music.noise=b;
- music.next=ac.currentTime+.06;setInterval(schedule,25);}
+ music.next=ac.currentTime+.06;setInterval(schedule,25);loadVoices();}
 function mood(){
- if(state!=='play')return{bpm:state==='doors'?124:100,int:state==='doors'?.45:.15};
- const left=stock/L.amount;const int=.3+.45*(1-left)+(power>.85?.25:0)+li*.05;
+ if(state==='wipe')return{bpm:126,int:.5};if(state!=='play')return{bpm:state==='doors'?124:100,int:state==='doors'?.45:.15};
+ const left=stock/L.amount;const int=.3+.45*(1-left)+(power>.85?.25:0)+li*.05+(ev?.3:0);
  return{bpm:112+li*6+(left<.3?10:0)+(power>.85?6:0),int:Math.min(1,int)};}
 function nz(t,dur,type,freq,g){const s=ac.createBufferSource(),f=ac.createBiquadFilter(),v=ac.createGain();s.buffer=music.noise;f.type=type;f.frequency.value=freq;
  v.gain.setValueAtTime(g,t);v.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(f).connect(v).connect(music.master);s.start(t);s.stop(t+dur+.02);}
@@ -150,6 +166,128 @@ function schedule(){const m=mood();const spb=60/m.bpm/4;
 const mb=document.createElement('button');mb.textContent='🔊';mb.style.cssText='position:fixed;left:12px;bottom:calc(16px + env(safe-area-inset-bottom));width:44px;height:44px;border-radius:50%;border:none;background:rgba(0,0,0,.45);color:#fff;font-size:20px;z-index:5';
 document.body.appendChild(mb);
 mb.addEventListener('pointerdown',e=>{e.stopPropagation();audio();music.muted=!music.muted;mb.textContent=music.muted?'🔇':'🔊';if(music.master)music.master.gain.value=music.muted?0:.2;});
+// ---------- voice ----------
+const VO={},VO_NAMES=['push1','push2','push3','huff','relief','forced','miss','perfect','occupied','knock','intruder','holddoor','blackout','lighton','tear','clean','nopaper','sock'];
+let voCool=0,voSrc=null,voLoaded=false;
+async function loadVoices(){if(voLoaded||!ac)return;voLoaded=true;
+ await Promise.all(VO_NAMES.map(async n=>{try{const r=await fetch('voice/'+n+'.mp3');VO[n]=await ac.decodeAudioData(await r.arrayBuffer());}catch(e){}}));}
+function say(n,force){if(!ac||!VO[n]||music.muted)return;if(!force&&voCool>0)return;
+ if(voSrc){try{voSrc.stop();}catch(e){}}const s=ac.createBufferSource(),g=ac.createGain();s.buffer=VO[n];g.gain.value=1.15;s.connect(g).connect(ac.destination);s.start();voSrc=s;voCool=VO[n].duration+.25;}
+function knockSfx(){if(!ac)return;for(const d of[0,.18,.36]){const t=ac.currentTime+d,o=ac.createOscillator(),g=ac.createGain();o.frequency.setValueAtTime(140,t);o.frequency.exponentialRampToValueAtTime(60,t+.08);g.gain.setValueAtTime(.8,t);g.gain.exponentialRampToValueAtTime(.001,t+.12);o.connect(g).connect(ac.destination);o.start(t);o.stop(t+.15);}}
+// ---------- events: door / blackout ----------
+let ev=null,evQueue=[],shake=0,lightF=1;
+const wedgeTex=(()=>{const c=document.createElement('canvas');c.width=64;c.height=256;const x=c.getContext('2d');const g=x.createLinearGradient(0,256,0,0);g.addColorStop(0,'rgba(255,240,200,1)');g.addColorStop(1,'rgba(255,240,200,0)');x.fillStyle=g;x.beginPath();x.moveTo(8,256);x.lineTo(56,256);x.lineTo(64,0);x.lineTo(0,0);x.fill();return new THREE.CanvasTexture(c);})();
+const wedge=new THREE.Mesh(new THREE.PlaneGeometry(.95,.95).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({map:wedgeTex,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false}));
+wedge.position.set(0,.006,.68);scene.add(wedge);
+const silTex=(()=>{const c=document.createElement('canvas');c.width=128;c.height=256;const x=c.getContext('2d');x.fillStyle='#000';x.beginPath();x.ellipse(64,40,26,30,0,0,7);x.fill();x.beginPath();x.ellipse(64,170,50,90,0,0,7);x.fill();return new THREE.CanvasTexture(c);})();
+const sil=new THREE.Mesh(new THREE.PlaneGeometry(.35,.7).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({map:silTex,transparent:true,opacity:0,depthWrite:false}));
+sil.position.set(.05,.007,.85);sil.rotation.y=Math.PI;scene.add(sil);
+const doorSpot=new THREE.SpotLight(0xfff0cc,0,5,.55,.6,1);doorSpot.position.set(0,1.9,1.5);doorSpot.target.position.set(0,0,.2);scene.add(doorSpot,doorSpot.target);
+const flashlight=new THREE.SpotLight(0xfffbe8,0,4,.26,.55,1.2);scene.add(flashlight,flashlight.target);
+
+function setLights(f){lightF=f;const dark=f<.5;
+ sun.intensity=1.7*f;hemiL.intensity=.55*f;scene.environmentIntensity=Math.max(.02,.55*f);
+ for(const b of bakedMeshes)b.mesh.material=dark?b.lit:b.basic;
+ flashlight.intensity=dark?7:0;}
+function scheduleEvents(){evQueue=(L.events||[]).map(type=>({type,at:.3+Math.random()*.45})).sort((a,b)=>b.at-a.at);ev=null;}
+function startEvent(e){
+ if(e.type==='door'){ev={type:'door',t:0,open:0,mash:0,need:4+li,phase:'knock'};knockSfx();say('knock',true);toast('叩叩叩！');}
+ else{ev={type:'blackout',t:0,dur:4.5+li*.35};say('blackout',true);toast('停電了！');}}
+function mashDoor(){if(!ev||ev.type!=='door'||ev.phase!=='push')return;ev.mash++;ev.open=Math.max(0,ev.open-.2);if(ev.mash===1)say('holddoor',true);}
+function updateEvent(dt){
+ if(!ev){if(evQueue.length&&stock/L.amount<=evQueue[0].at)startEvent(evQueue.shift());return;}
+ ev.t+=dt;
+ if(ev.type==='door'){
+  if(ev.phase==='knock'&&ev.t>.9){ev.phase='push';ev.t=0;$('#hold').classList.remove('hidden');}
+  else if(ev.phase==='push'){ev.open+=dt/2.0;
+   if(ev.mash>=ev.need){ev.phase='close';ev.t=0;toast('頂住了！');$('#hold').classList.add('hidden');}
+   else if(ev.open>=1){ev.phase='close';ev.t=-0.9;say('intruder',true);toast('被看光光了……');patience=Math.max(0,patience-20);shake=.7;
+    $('#flash').style.opacity=.6;setTimeout(()=>$('#flash').style.opacity=0,120);target.x+=(Math.random()-.5)*.3;target.z+=(Math.random()-.5)*.3;
+    $('#hold').classList.add('hidden');if(patience<=0){ev=null;gameOver('被看光光，社死。');return;}}}
+  else if(ev.phase==='close'){if(ev.t>0)ev.open=Math.max(0,ev.open-dt*2.5);if(ev.t>.5&&ev.open<=0){ev=null;}}
+  const o=ev?ev.open:0;wedge.material.opacity=o*.85;sil.material.opacity=o>.5?(o-.5)*1.2:0;doorSpot.intensity=o*30;
+ }else{
+  const d=ev.dur;if(ev.t<.7)setLights(Math.random()<.5?1:.03);else if(ev.t<d)setLights(.03);
+  else if(ev.t<d+.4)setLights(Math.random()<.5?1:.03);else{setLights(1);say('lighton');ev=null;}}
+}
+function clearEvents(){ev=null;evQueue=[];setLights(1);wedge.material.opacity=0;sil.material.opacity=0;doorSpot.intensity=0;$('#hold').classList.add('hidden');}
+// ---------- wipe minigame ----------
+const W={on:false};const wc=$('#wc'),wx=wc.getContext('2d');let dirt=null,dx=null;
+function wipeSheets(){return [5,4,3,3,2,1][li]||1;}
+function startWipe(hit){
+ state='wipe';clearEvents();$('#wipeUI').classList.remove('hidden');
+ const dpr=Math.min(devicePixelRatio,2);wc.width=innerWidth*dpr;wc.height=innerHeight*dpr;
+ const w=wc.width,h=wc.height,R=Math.min(w,h*.75)*.21,cx=w/2,cy=h*.55;
+ Object.assign(W,{on:true,hit,w,h,R,cx,cy,dpr,t:10,sheets:wipeSheets()-1,used:1,sat:0,stress:0,tears:0,smear:0,down:false,lx:0,ly:0,px:cx,py:cy+R*1.4,lastT:0,ended:false,finger:0,saidSock:false,noPaper:false,smearToast:0});
+ dirt=document.createElement('canvas');dirt.width=Math.ceil(w/3);dirt.height=Math.ceil(h/3);dx=dirt.getContext('2d');
+ const k=1/3,n=7+li*2+Math.round((hit.chunks||0)/4);
+ dx.fillStyle='rgba(96,54,22,.92)';
+ for(let i=0;i<n;i++){const a=(Math.random()-.5)*1.2,rr=R*(.25+Math.random()*.75);
+  dx.beginPath();dx.ellipse((cx+Math.sin(a)*rr*.9)*k,(cy+R*.15+Math.cos(a)*rr*.6)*k,R*k*(.12+Math.random()*.22),R*k*(.08+Math.random()*.16),Math.random()*3,0,7);dx.fill();}
+ dx.globalCompositeOperation='destination-in';peachPath(dx,k);dx.fill();dx.globalCompositeOperation='source-over';
+ W.d0=dirtPx();W.left=W.d0;
+}
+function peachPath(c,k){c.beginPath();c.ellipse((W.cx-W.R*.6)*k,W.cy*k,W.R*k,W.R*1.05*k,0,0,7);c.ellipse((W.cx+W.R*.6)*k,W.cy*k,W.R*k,W.R*1.05*k,0,0,7);}
+function dirtPx(){const d=dx.getImageData(0,0,dirt.width,dirt.height).data;let n=0;for(let i=3;i<d.length;i+=16)if(d[i]>40)n++;return n;}
+function drawWipe(){
+ const c=wx,{w,h,R,cx,cy}=W;c.clearRect(0,0,w,h);
+ const g=c.createRadialGradient(cx,cy-R*.6,R*.2,cx,cy,R*1.9);g.addColorStop(0,'#ffcf8a');g.addColorStop(.55,'#ff9d8c');g.addColorStop(1,'#e2546c');
+ c.fillStyle=g;peachPath(c,1);c.fill();
+ c.strokeStyle='rgba(170,40,70,.45)';c.lineWidth=R*.05;c.beginPath();c.moveTo(cx,cy-R*.9);c.quadraticCurveTo(cx-R*.05,cy,cx,cy+R*1.02);c.stroke();
+ c.fillStyle='#5fae4a';c.beginPath();c.ellipse(cx+R*.35,cy-R*1.12,R*.38,R*.13,-.4,0,7);c.fill();
+ c.drawImage(dirt,0,0,w,h);
+ if(W.finger>0){c.font=`${R*.9}px serif`;c.textAlign='center';c.fillText('👉',W.px,W.py);}
+ else if(W.used>0&&!W.noPaper){const pw=R*.75,ph=R*.9,b=Math.min(1,W.sat);
+  c.save();c.translate(W.px,W.py);c.rotate(-.15);c.fillStyle=`rgb(${250-b*120},${248-b*150},${240-b*190})`;c.shadowColor='rgba(0,0,0,.35)';c.shadowBlur=10;
+  c.fillRect(-pw/2,-ph/2,pw,ph);c.shadowBlur=0;c.strokeStyle='rgba(0,0,0,.08)';c.lineWidth=2;
+  for(let i=1;i<4;i++){c.beginPath();c.moveTo(-pw/2,-ph/2+ph*i/4);c.lineTo(pw/2,-ph/2+ph*i/4);c.stroke();}c.restore();}
+ else{c.font=`${R*.8}px serif`;c.textAlign='center';c.fillText('🧦',W.px,W.py);}
+}
+function wipeMove(x,y,dt){
+ x*=W.dpr;y*=W.dpr;const k=1/3;
+ if(W.down&&W.finger<=0){
+  const dist=Math.hypot(x-W.lx,y-W.ly),v=dist/Math.max(dt,.008)/W.dpr;
+  const limit=1500-li*130;W.stress=Math.min(1.2,W.stress+Math.max(0,v-limit)/limit*dt*5);
+  if(W.stress>=1&&!W.noPaper){tearSheet();}
+  else if(dist>0){
+   dx.lineCap='round';dx.lineWidth=W.R*.42*k;dx.beginPath();dx.moveTo(W.lx*k,W.ly*k);dx.lineTo(x*k,y*k);
+   if(W.sat<1||W.noPaper){dx.globalCompositeOperation='destination-out';dx.strokeStyle='rgba(0,0,0,'+(W.noPaper?.25:.55)+')';dx.stroke();}
+   else{dx.globalCompositeOperation='source-atop';dx.strokeStyle='rgba(96,54,22,.06)';dx.stroke();W.smear+=dist;
+    if(!W.smearToast){W.smearToast=1;toast('紙吸滿了！越擦越髒');}}
+   dx.globalCompositeOperation='source-over';}
+ }
+ W.lx=x;W.ly=y;W.px=x;W.py=y;
+}
+function tearSheet(){W.tears++;W.stress=0;W.finger=1.1;W.sat=0;say('tear',true);toast('擦破了！！手指……');
+ dx.fillStyle='rgba(96,54,22,.9)';dx.beginPath();dx.arc(W.px/3,W.py/3,W.R*.08,0,7);dx.fill();
+ $('#flash').style.background='#6b3e1e';$('#flash').style.opacity=.35;setTimeout(()=>{$('#flash').style.opacity=0;setTimeout(()=>$('#flash').style.background='#fff',400);},150);
+ setTimeout(()=>newSheet(true),1100);}
+function newSheet(auto){if(!W.on)return;if(W.sheets>0){W.sheets--;W.used++;W.sat=0;W.smearToast=0;}
+ else if(!W.noPaper){W.noPaper=true;say('nopaper',true);toast('沒衛生紙了……');setTimeout(()=>{if(W.on){say('sock',true);toast('只好用襪子');}},1600);}}
+function wipeTick(dt){
+ if(!W.on)return;W.t-=dt;W.finger-=dt;W.stress=Math.max(0,W.stress-dt*.8);
+ W.lastT+=dt;if(W.lastT>.2){W.lastT=0;const before=W.left;W.left=dirtPx();if(!W.noPaper)W.sat+=Math.max(0,before-W.left)/W.d0*2.4;}
+ const clean=1-W.left/W.d0;
+ $('#wTime').textContent='⏱ '+Math.max(0,W.t).toFixed(1)+'s';$('#wSheets').textContent=W.noPaper?'🧦 襪子':'🧻 '+'▮'.repeat(W.sheets+(W.sat<1?1:0))+(W.sat>=1?'（吸滿）':'');
+ $('#wClean').textContent='乾淨度 '+Math.round(clean*100)+'%';$('#wStress').style.width=Math.min(100,W.stress*100)+'%';
+ drawWipe();
+ if(clean>=.985&&!W.ended){say('clean',true);finishWipe();}
+ else if(W.t<=0&&!W.ended)finishWipe();
+}
+function finishWipe(){W.ended=true;W.on=false;$('#wipeUI').classList.add('hidden');
+ const clean=1-W.left/W.d0;let sc=clean*100-W.tears*10-(W.noPaper?15:0)-Math.min(15,W.smear/W.R*1.5);sc=Math.max(0,Math.round(sc));
+ const grade=sc>=95?'S':sc>=85?'A':sc>=70?'B':sc>=50?'C':'D';
+ let title=grade==='S'?'屁屁潔白如新 ✨':clean<.5?'帶著秘密離開':'還有一點點殘留';
+ if(W.used===1&&clean>=.9&&!W.tears)title='一張搞定，環保大師 🌱';
+ if(W.smear>W.R*4)title='越擦越髒的藝術家';
+ if(W.tears)title=W.tears>1?'手指已經回不去了（×'+W.tears+'）':'擦破了，手指沾到了…';
+ if(W.noPaper)title='最後用襪子擦的人 🧦';
+ showResult(W.hit,{clean,sc,grade,title,used:W.used,tears:W.tears});}
+const wcEl=wc;let wLastT=0;
+wcEl.addEventListener('pointerdown',e=>{if(!W.on)return;W.down=true;W.lx=e.clientX*W.dpr;W.ly=e.clientY*W.dpr;wLastT=performance.now();});
+wcEl.addEventListener('pointermove',e=>{if(!W.on)return;const n=performance.now();wipeMove(e.clientX,e.clientY,(n-wLastT)/1000);wLastT=n;});
+addEventListener('pointerup',()=>{W.down=false;});
+$('#wNew').addEventListener('click',()=>newSheet(false));$('#wDone').addEventListener('click',()=>{if(W.on&&!W.ended)finishWipe();});
 let toastT=0;function toast(s){const e=$('#toast');e.textContent=s;e.style.opacity=1;toastT=1.4;}
 
 // ---------- levels ----------
@@ -165,16 +303,16 @@ async function startLevel(i){
   const g=new THREE.ExtrudeGeometry(sh,{depth:.12,bevelEnabled:false}).rotateX(-Math.PI/2);
   stepMesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xc9d2cf,roughness:.35}));stepMesh.castShadow=stepMesh.receiveShadow=true;scene.add(stepMesh);}
  stock=L.amount;acc=0;power=0;forced=0;idle=0;endTimer=0;
- smooth.set(0,L.emitY,.05);target.copy(smooth);emitter.copy(smooth);
+ gyro.b0=gyro.on?gyro.b:null;smooth.set(0,L.emitY,.05);target.copy(smooth);emitter.copy(smooth);
  camera.position.set(0,1.55,.28);camera.lookAt(0,.2,-.05);
- $('#lvl').textContent=L.name+(li>0?'　'+'🔥'.repeat(Math.min(3,Math.ceil(li/2))):'');state='play';hideMsg();toast(L.intro.split('。')[0]);
+ scheduleEvents();clearEvents();scheduleEvents();missSaid=false;relSaid=false;chunks=0;$('#lvl').textContent=L.name+(li>0?'　'+'🔥'.repeat(Math.min(3,Math.ceil(li/2))):'');state='play';hideMsg();toast(L.intro.split('。')[0]);
 }
 function floorAt(x,z){return (L&&L.step&&Math.abs(x)<.35&&Math.abs(z)<.55)?.12:0;}
 
 // ---------- strands ----------
 function startStrand(){
  const r=power>.85?.012:.03-power*.016;
- const maxLen=power>.85?.04+Math.random()*.04:.25+Math.random()*.45*(1-power);
+ if(power>.85)chunks++;const maxLen=power>.85?.04+Math.random()*.04:.25+Math.random()*.45*(1-power);
  active={pts:[],r,maxLen,len:0,seed:Math.random()*100,mesh:null,splashed:false};strands.push(active);
  const p=emitter.clone();active.pts.push({p,q:p.clone(),state:'pinned',prevL:0,local:null});
 }
@@ -217,7 +355,7 @@ function physics(){
     }
     o.prevL=lv.y;
     const fy=floorAt(o.p.x,o.p.z);
-    if(o.state==='free'&&o.p.y<=fy+s.r*.5){o.p.y=fy+s.r*.5;o.state='miss';if(Math.random()<.35)splat();continue;}
+    if(o.state==='free'&&o.p.y<=fy+s.r*.5){o.p.y=fy+s.r*.5;o.state='miss';if(!missSaid&&Math.random()<.5){missSaid=true;say('miss');}if(Math.random()<.35)splat();continue;}
    }
    if(o.state==='in'){
     const dx=lv.x/hp.rx,dz=(lv.z-hp.cz)/hp.rz,e=dx*dx+dz*dz;
@@ -251,6 +389,10 @@ function buildTube(s){
 const ray=new THREE.Raycaster(),ndc=new THREE.Vector2(),hitP=new THREE.Vector3();
 const plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
 let touchLast=null;
+const gyro={on:false,b0:null,g:0,b:0};
+function enableGyro(){if(!matchMedia('(pointer:coarse)').matches)return;
+ const go=()=>addEventListener('deviceorientation',e=>{if(e.beta==null)return;if(!gyro.on){gyro.on=true;toast('傾斜手機移動桃子 📱');}gyro.g=e.gamma;gyro.b=e.beta;if(gyro.b0===null)gyro.b0=e.beta;});
+ try{if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){DeviceOrientationEvent.requestPermission().then(r=>{if(r==='granted')go();}).catch(()=>{});}else go();}catch(e){}}
 const cv=renderer.domElement;
 cv.addEventListener('pointermove',e=>{
  if(state!=='play')return;
@@ -261,20 +403,20 @@ cv.addEventListener('pointermove',e=>{
 });
 cv.addEventListener('pointerdown',e=>{audio();if(e.pointerType==='mouse')pushing=true;else{touchLast={x:e.clientX,y:e.clientY};$('#push').style.display='block';}});
 addEventListener('pointerup',e=>{if(e.pointerType==='mouse')pushing=false;else touchLast=null;});
-const pb=$('#push');
+$('#hold').addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();mashDoor();});const pb=$('#push');
 pb.addEventListener('pointerdown',e=>{e.stopPropagation();audio();pushing=true;pb.classList.add('on');});
 pb.addEventListener('pointerup',e=>{e.stopPropagation();pushing=false;pb.classList.remove('on');});
 pb.addEventListener('pointerleave',()=>{pushing=false;pb.classList.remove('on');});
-addEventListener('keydown',e=>{if(e.code==='Space'){audio();pushing=true;e.preventDefault();}});
+addEventListener('keydown',e=>{if((e.code==='KeyE'||e.code==='KeyF'||e.code==='Enter')&&!e.repeat)mashDoor();if(e.code==='Space'){audio();pushing=true;e.preventDefault();}});
 addEventListener('keyup',e=>{if(e.code==='Space')pushing=false;});
 if(matchMedia('(pointer:coarse)').matches)pb.style.display='block';
 
 // ---------- overlays ----------
 function showMsg(h){const m=$('#msg');m.innerHTML=h;m.classList.remove('hidden');}
 function hideMsg(){$('#msg').classList.add('hidden');}
-function menu(){state='menu';patience=100;
- showMsg(`<h1>💩 烙賽模擬器</h1><p>移動滑鼠（手機：拖曳畫面）控制屁股位置，<br>按住滑鼠／空白鍵／「用力」鈕出力。<br>力道在<b style="color:#7be39a">綠區</b>最穩，太大會噴射，太久不出力會憋不住。<br>越後面量越多、掉越快、晃越大。</p><button class="go" id="go">開始烙賽</button>`);
- $('#go').onclick=()=>{audio();enter(0);};}
+function menu(){clearEvents();state='menu';patience=100;
+ showMsg(`<h1>💩 烙賽模擬器</h1><p>移動滑鼠（手機：拖曳畫面）控制屁股位置，<br>按住滑鼠／空白鍵／「用力」鈕出力。<br>📱 手機會用陀螺儀：傾斜手機就能移動桃子（每關開始時的角度會當作中心）。<br>力道在<b style="color:#7be39a">綠區</b>最穩，太大會噴射，太久不出力會憋不住。<br>越後面量越多、掉越快、晃越大。<br>小心有人推門（連按 E／頂住門鈕）和停電！<br>烙完還要擦屁股：太用力會擦破喔。</p><button class="go" id="go">開始烙賽</button>`);
+ $('#go').onclick=()=>{audio();enableGyro();enter(0);};}
 function enter(i){const lv=LEVELS[i];if(lv.doors)doorPick(i);else startLevel(i);}
 function doorPick(i){state='doors';const n=LEVELS[i].doors,free=Math.floor(Math.random()*n);
  let h=`<h1>全滿了！</h1><p>${LEVELS[i].name}<br>每間都關著，猜哪一間有空？猜錯會扣忍耐值。</p><div id="doors">`;
@@ -285,14 +427,17 @@ function doorPick(i){state='doors';const n=LEVELS[i].doors,free=Math.floor(Math.
   d.classList.add('occ');d.textContent='有人啦！';patience-=30;splat();
   if(patience<=0){gameOver('來不及了……褲子陣亡。');}
  });}
-function gameOver(s){state='over';showMsg(`<h1>${s}</h1><p>忍耐值歸零。</p><button class="go" id="go">重新開始</button>`);$('#go').onclick=menu;}
+function gameOver(s){clearEvents();state='over';showMsg(`<h1>${s}</h1><p>忍耐值歸零。</p><button class="go" id="go">重新開始</button>`);$('#go').onclick=menu;}
 function endLevel(){
  state='result';let w=0,r=0,m=0;
  for(const s of strands)for(const o of s.pts){if(o.state==='water')w++;else if(o.state==='rim')r++;else if(o.state==='miss')m++;}
- const tot=w+r+m||1,pct=Math.round(w/tot*100),pass=pct>=60;
+ const tot=w+r+m||1,pct=Math.round(w/tot*100),pass=pct>=60;if(pct>=90)say('perfect',true);
+ startWipe({pct,pass,r,m,chunks});}
+function showResult(hit,wp){state='result';const {pct,pass,r,m}=hit;
  const last=li===LEVELS.length-1;
+ 
  showMsg(`<h1>${pass?(pct>=90?'完美入洞！':'過關'):'噴得到處都是……'}</h1>
- <p>命中率 <b>${pct}%</b><br>${r?`坐墊中獎 ${r} 段　`:''}${m?`地板 ${m} 段`:''}${(!r&&!m)?'一滴不漏':''}</p>
+ <p>命中率 <b>${pct}%</b><br>${r?`坐墊中獎 ${r} 段　`:''}${m?`地板 ${m} 段`:''}${(!r&&!m)?'一滴不漏':''}</p><p style="margin-top:-6px">🧻 擦屁股評分 <b style="font-size:26px;color:#ffd36b">${wp.grade}</b>（${wp.sc} 分）<br>${wp.title}<br><span style="font-size:13px;opacity:.8">乾淨度 ${Math.round(wp.clean*100)}%・用了 ${wp.used} 張${wp.tears?`・擦破 ${wp.tears} 次`:''}</span></p>
  <button class="go" id="go">${pass?(last?'全破！再玩一次':'下一間'):'重來這間'}</button>`);
  $('#go').onclick=()=>{if(!pass)startLevel(li);else if(last)menu();else enter(li+1);};
 }
@@ -308,22 +453,27 @@ function hud(){
  document.querySelector('#power .lvl').style.background=power>.85?'#ff4d4d':power>.65?'#ffb347':power>.35?'#7bd389':'#c8873a';
 }
 function frame(){
- const dt=Math.min(clock.getDelta(),.05);t+=dt;
+ const dt=Math.min(clock.getDelta(),.05);t+=dt;voCool-=dt;if(state==='wipe')wipeTick(dt);
  if(state==='play'){
   const want=pushing||forced>0;if(forced>0)forced-=dt;
   power=want?Math.min(1,power+dt*(forced>0?1.6:.55)):Math.max(0,power-dt*1.8);
   if(!want&&stock>0)idle+=dt;else idle=0;
-  if(idle>5){forced=1.3;idle=0;toast('憋不住了！！');}
+  if(idle>5){forced=1.3;idle=0;toast('憋不住了！！');say('forced',true);}
+  if(gyro.on){target.x=clamp(gyro.g/26*.42,-.42,.42);target.z=clamp(.05+(gyro.b-gyro.b0)/26*.5,-.42,.75);}
   smooth.x+=(target.x-smooth.x)*Math.min(1,dt*6);smooth.z+=(target.z-smooth.z)*Math.min(1,dt*6);
   const sw=L.sway*(1+power*1.5);
   emitter.set(smooth.x+sw*(Math.sin(t*1.7)+.6*Math.sin(t*3.3+1)),L.emitY,smooth.z+sw*(Math.sin(t*1.3+2)+.5*Math.sin(t*2.9)));
+  const band=power>.85?3:power>.6?2:power>.25?1:0;if(band>powBand)say('push'+band,band===3);else if(band===0&&powBand>=2&&Math.random()<.4)say('huff');powBand=band;
+  updateEvent(dt);if(state!=='play')return requestAnimationFrame(frame);
   if(L.moving)model.position.x=Math.sin(t*1.1)*.14+Math.sin(t*2.7)*.04;
   if(power>.12&&stock>0){if(!active)startStrand();acc+=(.15+power*.75)*L.rate*dt;
    while(acc>=SEG&&stock>0){acc-=SEG;stock-=SEG;emitParticle();if(active.len>=active.maxLen){breakStrand();startStrand();}}}
   else if(active)breakStrand();
-  if(stock<=0){stock=0;if(active)breakStrand();endTimer+=dt;
+  if(stock<=0){stock=0;if(active)breakStrand();endTimer+=dt;if(!relSaid){relSaid=true;say('relief',true);}
    const moving=strands.some(s=>s.pts.some(o=>!FROZEN[o.state]));if((!moving&&endTimer>.8)||endTimer>5)endLevel();}
   camera.position.y=1.55+Math.sin(t*1.2)*.004;
+  if(shake>0){shake-=dt;camera.position.x=(Math.random()-.5)*shake*.06;}else camera.position.x=0;
+  flashlight.position.copy(camera.position).add(new THREE.Vector3(.08,-.1,0));flashlight.target.position.set(emitter.x,0,emitter.z-.05);
  }
  phAcc+=dt;while(phAcc>=H){if(L&&node&&strands.length)physics();phAcc-=H;}
  for(const s of strands){if(L.moving||s.pts.some(o=>!FROZEN[o.state]))buildTube(s);}
